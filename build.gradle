@@ -28,7 +28,7 @@ java {
 }
 
 group = "io.kestra.plugin"
-description = 'Plugin template for Kestra'
+description = 'Plugin Anthropic for Kestra'
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"
@@ -96,6 +96,9 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
     testImplementation "org.hamcrest:hamcrest"
     testImplementation "org.hamcrest:hamcrest-library"
+
+    // Anthropic
+    implementation("com.anthropic:anthropic-java:2.1.0")
 }
 
 /**********************************************************************************************************************\
@@ -172,8 +175,8 @@ jar {
     manifest {
         attributes(
                 "X-Kestra-Name": project.name,
-                "X-Kestra-Title": "Template",
-                "X-Kestra-Group": project.group + ".templates",
+                "X-Kestra-Title": "Anthropic",
+                "X-Kestra-Group": project.group + ".anthropic",
                 "X-Kestra-Description": project.description,
                 "X-Kestra-Version": project.version
         )
