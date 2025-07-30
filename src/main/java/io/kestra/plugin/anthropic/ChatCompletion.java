@@ -29,7 +29,7 @@ import java.util.List;
 @NoArgsConstructor
 @Schema(
     title = "Complete a chat using the Anthropic Claude API.",
-    description = "Send messages to Claude models and receive responses. See [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages_post) for more information."
+    description = "Send messages to Claude models and receive responses. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages_post) for more information."
 )
 @Plugin(
     examples = {
