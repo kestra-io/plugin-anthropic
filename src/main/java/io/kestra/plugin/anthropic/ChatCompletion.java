@@ -94,7 +94,7 @@ import java.util.List;
                     messages:
                       - type: USER
                         content: "Explain quantum computing in simple terms."
-                      - type: AI
+                      - type: ASSISTANT
                         content: "Quantum computing uses quantum mechanical phenomena like superposition and entanglement to process information differently than classical computers. Instead of bits that are either 0 or 1, quantum computers use quantum bits (qubits) that can exist in multiple states simultaneously."
                       - type: USER
                         content: "That is helpful! Can you give me a practical example of how this could be used in everyday life in the next 10 years?"
@@ -169,7 +169,7 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     }
 
     public enum ChatMessageType {
-        AI("assistant"),
+        ASSISTANT("assistant"),
         USER("user");
 
         private final String role;
