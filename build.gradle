@@ -98,7 +98,7 @@ dependencies {
     testImplementation "org.hamcrest:hamcrest-library"
 
     // Anthropic
-    implementation("com.anthropic:anthropic-java:2.9.0")
+    implementation("com.anthropic:anthropic-java:2.10.0")
 }
 
 /**********************************************************************************************************************\
