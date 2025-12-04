@@ -1,8 +1,8 @@
 group: io.kestra.plugin.anthropic
 name: "anthropic"
 title: "Anthropic"
-description: "A plugin to use Anthropic."
-body: ""
+description: "Tasks that call Anthropic Claude models for chat completions."
+body: "Configure an Anthropic API key, pick the Claude model to run, tune generation controls like temperature and max tokens, and capture token usage metrics for your executions."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
