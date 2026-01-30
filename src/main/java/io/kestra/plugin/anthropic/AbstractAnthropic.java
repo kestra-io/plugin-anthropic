@@ -28,34 +28,34 @@ public abstract class AbstractAnthropic extends Task {
 
     @Schema(
         title = "Model",
-        description = "Specifies which Claude model to use for the completion (e.g., 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')."
+        description = "Claude model name to invoke (e.g., claude-3-5-sonnet-20241022); must match an Anthropic model available to your API key."
     )
     @NotNull
     protected Property<String> model;
 
     @Schema(
         title = "Max Tokens",
-        description = "The maximum number of tokens to generate in the response."
+        description = "Maximum tokens Anthropic can generate; defaults to 1024 if unset."
     )
     @Builder.Default
     protected Property<Long> maxTokens = Property.ofValue(1024L);
 
     @Schema(
         title = "Temperature",
-        description = "Controls randomness in the response. Higher values make output more random."
+        description = "Sampling randomness; range 0.0–1.0 with default 1.0. Lower for deterministic replies."
     )
     @Builder.Default
     protected Property<@Max(1) Double> temperature = Property.ofValue(1.0);
 
     @Schema(
         title = "Top P",
-        description = "Controls diversity via nucleus sampling. 0.1 means only the tokens comprising the top 10% probability mass are considered."
+        description = "Nucleus sampling cap; 0.1 keeps only tokens in top 10% probability mass."
     )
     protected Property<Double> topP;
 
     @Schema(
         title = "Top K",
-        description = "Only sample from the top K options for each subsequent token."
+        description = "Samples only from the top K tokens for each step; leave unset to let the model choose."
     )
     protected Property<Integer> topK;
 
