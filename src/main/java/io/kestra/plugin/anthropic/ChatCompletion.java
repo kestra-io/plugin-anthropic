@@ -56,7 +56,7 @@ import java.util.Map;
                 """
         ),
         @Example(
-            title = "Code generation using Claude.",
+            title = "Code generation using Claude",
             full = true,
             code = """
                 id: anthropic_code_generation
@@ -82,7 +82,7 @@ import java.util.Map;
                 """
         ),
         @Example(
-            title = "Conversation with follow-up context.",
+            title = "Conversation with follow-up context",
             full = true,
             code = """
                 id: anthropic_context_conversation
@@ -105,7 +105,7 @@ import java.util.Map;
                 """
         ),
         @Example(
-            title = "Structured output using tool use.",
+            title = "Tool-assisted structured extraction",
             full = true,
             code = """
                 id: anthropic_structured_output
@@ -170,7 +170,7 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
     private Property<String> system;
 
-    @Schema(title = "Tools", description = "List of tools available for Claude to use. Each tool must have a name, description, and input_schema defining the expected parameters.")
+    @Schema(title = "Tools", description = "Optional tools Claude can invoke; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts.")
     private Property<List<Tool>> tools;
 
     @Override
