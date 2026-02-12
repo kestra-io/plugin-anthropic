@@ -22,7 +22,9 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -102,6 +104,47 @@ import java.util.List;
                         content: "That is helpful! Can you give me a practical example of how this could be used in everyday life in the next 10 years?"
                 """
         ),
+        @Example(
+            title = "Structured output using tool use.",
+            full = true,
+            code = """
+                id: anthropic_structured_output
+                namespace: company.team
+
+                tasks:
+                  - id: extract_data
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: "claude-3-5-sonnet-20241022"
+                    maxTokens: 1024
+                    messages:
+                      - type: USER
+                        content: |
+                          Extract the following information from this text:
+                          "John Doe is 30 years old and works as a Software Engineer in San Francisco."
+                    tools:
+                      - name: extract_person_info
+                        description: "Extract structured information about a person"
+                        input_schema:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              description: "The person's full name"
+                            age:
+                              type: integer
+                              description: "The person's age"
+                            occupation:
+                              type: string
+                              description: "The person's job title"
+                            location:
+                              type: string
+                              description: "The person's location"
+                          required:
+                            - name
+                            - age
+                """
+        ),
     },
     metrics = {
                @Metric(
@@ -127,6 +170,9 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
     private Property<String> system;
 
+    @Schema(title = "Tools", description = "List of tools available for Claude to use. Each tool must have a name, description, and input_schema defining the expected parameters.")
+    private Property<List<Tool>> tools;
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
@@ -137,6 +183,7 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         var rTopP = runContext.render(topP).as(Double.class);
         var rTopK = runContext.render(topK).as(Integer.class);
         var rSystem = runContext.render(system).as(String.class);
+        var rTools = runContext.render(tools).asList(Tool.class);
 
         var client = AnthropicOkHttpClient.builder()
             .apiKey(rApiKey)
@@ -159,6 +206,48 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         rTopP.ifPresent(paramsBuilder::topP);
         rTopK.ifPresent(paramsBuilder::topK);
 
+        // Add tools if provided
+        if (!rTools.isEmpty()) {
+            List<com.anthropic.models.messages.ToolUnion> toolParams = rTools.stream()
+                .map(tool -> {
+                    var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
+
+                    // Build input schema from the provided map
+                    if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
+                        var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
+
+                        // Convert properties to JsonValue
+                        properties.forEach((key, value) -> {
+                            com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
+                            propertiesBuilder.putAdditionalProperty(key, jsonValue);
+                        });
+
+                        inputSchemaBuilder.properties(propertiesBuilder.build());
+
+                        // Add required fields if present
+                        if (tool.inputSchema.containsKey("required")) {
+                            @SuppressWarnings("unchecked")
+                            List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
+                            inputSchemaBuilder.required(requiredFields);
+                        }
+                    }
+
+                    var toolBuilder = com.anthropic.models.messages.Tool.builder()
+                        .name(tool.name)
+                        .inputSchema(inputSchemaBuilder.build());
+
+                    if (tool.description != null && !tool.description.isEmpty()) {
+                        toolBuilder.description(tool.description);
+                    }
+
+                    return com.anthropic.models.messages.ToolUnion.ofTool(toolBuilder.build());
+                })
+                .toList();
+            paramsBuilder.tools(toolParams);
+        }
+
         paramsBuilder.messages(messageParams);
 
         var params = paramsBuilder.build();
@@ -167,16 +256,40 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         sendMetrics(runContext, response);
 
         StringBuilder outputText = new StringBuilder();
+        List<ToolUse> toolUses = new ArrayList<>();
+
         for (ContentBlock block : response.content()) {
             if (block.text().isPresent()) {
                 var textBlock = block.text().get();
                 outputText.append(textBlock.text());
+            } else if (block.toolUse().isPresent()) {
+                var toolUseBlock = block.toolUse().get();
+
+                // Convert JsonValue input to Map
+                Map<String, Object> inputMap = null;
+                try {
+                    com.anthropic.core.JsonValue inputJson = toolUseBlock._input();
+                    String inputJsonString = JacksonMapper.ofJson().writeValueAsString(inputJson);
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> parsedInput = JacksonMapper.ofJson().readValue(inputJsonString, Map.class);
+                    inputMap = parsedInput;
+                } catch (Exception e) {
+                    // If conversion fails, leave input as null
+                }
+
+                toolUses.add(ToolUse.builder()
+                    .id(toolUseBlock.id())
+                    .name(toolUseBlock.name())
+                    .input(inputMap)
+                    .build());
             }
         }
 
         return Output.builder()
             .rawResponse(JacksonMapper.ofJson().writeValueAsString(response))
             .outputText(outputText.toString())
+            .toolUses(toolUses.isEmpty() ? null : toolUses)
+            .stopReason(response.stopReason().toString())
             .build();
     }
 
@@ -200,6 +313,32 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     }
 
     @Builder
+    public record Tool(
+        @Schema(title = "Tool name", description = "Unique identifier for the tool (1-128 characters).")
+        String name,
+
+        @Schema(title = "Tool description", description = "Optional description of what the tool does.")
+        String description,
+
+        @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.")
+        Map<String, Object> inputSchema
+    ) {
+    }
+
+    @Builder
+    public record ToolUse(
+        @Schema(title = "Tool use ID", description = "Unique identifier for this tool use.")
+        String id,
+
+        @Schema(title = "Tool name", description = "Name of the tool being called.")
+        String name,
+
+        @Schema(title = "Tool input", description = "Parameters passed to the tool as a map.")
+        Map<String, Object> input
+    ) {
+    }
+
+    @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(title = "The full response from Claude.")
@@ -207,5 +346,11 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
 
         @Schema(title = "Assistant text extracted from the response.")
         private String outputText;
+
+        @Schema(title = "Tool uses", description = "List of tools that Claude requested to use, if any.")
+        private List<ToolUse> toolUses;
+
+        @Schema(title = "Stop reason", description = "The reason the model stopped generating (e.g., end_turn, tool_use, max_tokens).")
+        private String stopReason;
     }
 }
