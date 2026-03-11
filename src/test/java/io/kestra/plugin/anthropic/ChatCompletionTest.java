@@ -1,15 +1,17 @@
 package io.kestra.plugin.anthropic;
 
-import io.kestra.core.junit.annotations.KestraTest;
-import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.RunContextFactory;
-import jakarta.inject.Inject;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+
+import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContextFactory;
+
+import jakarta.inject.Inject;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -25,16 +27,18 @@ public class ChatCompletionTest {
     @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*")
     @Test
     void shouldGetResultsWithAnthropicChatCompletion() throws Exception {
-        var runContext = runContextFactory.of(Map.of(
-            "apiKey", ANTHROPIC_API_KEY,
-            "model", "claude-3-5-sonnet-20241022",
-            "messages", List.of(
-                ChatCompletion.ChatMessage.builder()
-                    .type(ChatCompletion.ChatMessageType.USER)
-                    .content("What is the capital of France? Answer just the name.")
-                    .build()
+        var runContext = runContextFactory.of(
+            Map.of(
+                "apiKey", ANTHROPIC_API_KEY,
+                "model", "claude-3-5-sonnet-20241022",
+                "messages", List.of(
+                    ChatCompletion.ChatMessage.builder()
+                        .type(ChatCompletion.ChatMessageType.USER)
+                        .content("What is the capital of France? Answer just the name.")
+                        .build()
+                )
             )
-        ));
+        );
 
         var task = ChatCompletion.builder()
             .apiKey(Property.ofExpression("{{ apiKey }}"))
@@ -54,10 +58,12 @@ public class ChatCompletionTest {
     void shouldUseToolsForStructuredOutput() throws Exception {
         Map<String, Object> schema = new HashMap<>();
         schema.put("type", "object");
-        schema.put("properties", Map.of(
-            "name", Map.of("type", "string"),
-            "age", Map.of("type", "integer")
-        ));
+        schema.put(
+            "properties", Map.of(
+                "name", Map.of("type", "string"),
+                "age", Map.of("type", "integer")
+            )
+        );
         schema.put("required", List.of("name", "age"));
 
         var tool = ChatCompletion.Tool.builder()
@@ -66,17 +72,19 @@ public class ChatCompletionTest {
             .inputSchema(schema)
             .build();
 
-        var runContext = runContextFactory.of(Map.of(
-            "apiKey", ANTHROPIC_API_KEY,
-            "model", "claude-3-5-sonnet-20241022",
-            "messages", List.of(
-                ChatCompletion.ChatMessage.builder()
-                    .type(ChatCompletion.ChatMessageType.USER)
-                    .content("John is 25 years old")
-                    .build()
-            ),
-            "tools", List.of(tool)
-        ));
+        var runContext = runContextFactory.of(
+            Map.of(
+                "apiKey", ANTHROPIC_API_KEY,
+                "model", "claude-3-5-sonnet-20241022",
+                "messages", List.of(
+                    ChatCompletion.ChatMessage.builder()
+                        .type(ChatCompletion.ChatMessageType.USER)
+                        .content("John is 25 years old")
+                        .build()
+                ),
+                "tools", List.of(tool)
+            )
+        );
 
         var task = ChatCompletion.builder()
             .apiKey(Property.ofExpression("{{ apiKey }}"))
