@@ -99,4 +99,34 @@ public class ChatCompletionTest {
         assertThat(output.getToolUses(), hasSize(1));
         assertThat(output.getToolUses().get(0).name(), is("extract_person"));
     }
+
+    @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*")
+    @Test
+    void shouldSupportPromptCaching() throws Exception {
+        var runContext = runContextFactory.of(
+            Map.of(
+                "apiKey", ANTHROPIC_API_KEY,
+                "model", "claude-sonnet-4-5-20250514",
+                "messages", List.of(
+                    ChatCompletion.ChatMessage.builder()
+                        .type(ChatCompletion.ChatMessageType.USER)
+                        .content("What is the capital of France? Answer just the name.")
+                        .build()
+                )
+            )
+        );
+
+        var task = ChatCompletion.builder()
+            .apiKey(Property.ofExpression("{{ apiKey }}"))
+            .model(Property.ofExpression("{{ model }}"))
+            .messages(Property.ofExpression("{{ messages }}"))
+            .promptCaching(Property.ofValue(true))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output, notNullValue());
+        assertThat(output.getOutputText(), containsStringIgnoringCase("paris"));
+        assertThat(output.getStopReason(), is("end_turn"));
+    }
 }

@@ -64,5 +64,11 @@ public abstract class AbstractAnthropic extends Task {
     protected void sendMetrics(RunContext runContext, Message message) {
         runContext.metric(Counter.of("usage.input.tokens", message.usage().inputTokens()));
         runContext.metric(Counter.of("usage.output.tokens", message.usage().outputTokens()));
+        message.usage().cacheCreationInputTokens().ifPresent(tokens ->
+            runContext.metric(Counter.of("usage.cache.creation.tokens", tokens))
+        );
+        message.usage().cacheReadInputTokens().ifPresent(tokens ->
+            runContext.metric(Counter.of("usage.cache.read.tokens", tokens))
+        );
     }
 }
