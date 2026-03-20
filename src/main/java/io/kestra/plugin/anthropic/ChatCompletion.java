@@ -214,9 +214,9 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     @Schema(
         title = "Prompt caching",
         description = """
-            Enable prompt caching to reduce costs and latency for repetitive prompts. \
-            When enabled, the API automatically caches the longest cacheable prefix of the request. \
-            Cached tokens are billed at a reduced rate. \
+            Enable prompt caching to reduce costs and latency for repetitive prompts.
+            When enabled, the API automatically caches the longest cacheable prefix of the request.
+            Cached tokens are billed at a reduced rate.
             See the [Anthropic prompt caching documentation](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) for details."""
     )
     @Builder.Default
