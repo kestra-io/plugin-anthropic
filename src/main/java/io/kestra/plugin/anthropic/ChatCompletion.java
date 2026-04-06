@@ -28,6 +28,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -200,15 +201,18 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
 
     @Schema(title = "Messages", description = "Ordered chat turns rendered from properties; include at least one USER message.")
     @NotNull
+    @PluginProperty(group = "main")
     private Property<List<ChatMessage>> messages;
 
     @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
+    @PluginProperty(group = "advanced")
     private Property<String> system;
 
     @Schema(
         title = "Tools",
         description = "Optional tools Claude can invoke; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts."
     )
+    @PluginProperty(group = "destination")
     private Property<List<Tool>> tools;
 
     @Schema(
