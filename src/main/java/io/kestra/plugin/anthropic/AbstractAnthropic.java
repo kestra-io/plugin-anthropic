@@ -16,6 +16,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -26,6 +27,7 @@ public abstract class AbstractAnthropic extends Task {
 
     @Schema(title = "Anthropic API Key")
     @NotNull
+    @PluginProperty(group = "main")
     protected Property<String> apiKey;
 
     @Schema(
@@ -33,6 +35,7 @@ public abstract class AbstractAnthropic extends Task {
         description = "Claude model name to invoke (e.g., claude-3-5-sonnet-20241022); must match an Anthropic model available to your API key."
     )
     @NotNull
+    @PluginProperty(group = "main")
     protected Property<String> model;
 
     @Schema(
@@ -40,6 +43,7 @@ public abstract class AbstractAnthropic extends Task {
         description = "Maximum tokens Anthropic can generate; defaults to 1024 if unset."
     )
     @Builder.Default
+    @PluginProperty(group = "execution")
     protected Property<Long> maxTokens = Property.ofValue(1024L);
 
     @Schema(
@@ -53,12 +57,14 @@ public abstract class AbstractAnthropic extends Task {
         title = "Top P",
         description = "Nucleus sampling cap; 0.1 keeps only tokens in top 10% probability mass."
     )
+    @PluginProperty(group = "advanced")
     protected Property<Double> topP;
 
     @Schema(
         title = "Top K",
         description = "Samples only from the top K tokens for each step; leave unset to let the model choose."
     )
+    @PluginProperty(group = "advanced")
     protected Property<Integer> topK;
 
     protected void sendMetrics(RunContext runContext, Message message) {
