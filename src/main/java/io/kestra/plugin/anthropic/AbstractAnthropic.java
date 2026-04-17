@@ -32,7 +32,7 @@ public abstract class AbstractAnthropic extends Task {
 
     @Schema(
         title = "Model",
-        description = "Claude model name to invoke (e.g., claude-3-5-sonnet-20241022); must match an Anthropic model available to your API key."
+        description = "Claude model name to invoke (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
     )
     @NotNull
     @PluginProperty(group = "main")

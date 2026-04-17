@@ -30,7 +30,7 @@ public class ChatCompletionTest {
         var runContext = runContextFactory.of(
             Map.of(
                 "apiKey", ANTHROPIC_API_KEY,
-                "model", "claude-3-5-sonnet-20241022",
+                "model", "claude-sonnet-4-6",
                 "messages", List.of(
                     ChatCompletion.ChatMessage.builder()
                         .type(ChatCompletion.ChatMessageType.USER)
@@ -75,7 +75,7 @@ public class ChatCompletionTest {
         var runContext = runContextFactory.of(
             Map.of(
                 "apiKey", ANTHROPIC_API_KEY,
-                "model", "claude-3-5-sonnet-20241022",
+                "model", "claude-sonnet-4-6",
                 "messages", List.of(
                     ChatCompletion.ChatMessage.builder()
                         .type(ChatCompletion.ChatMessageType.USER)
@@ -106,7 +106,7 @@ public class ChatCompletionTest {
         var runContext = runContextFactory.of(
             Map.of(
                 "apiKey", ANTHROPIC_API_KEY,
-                "model", "claude-sonnet-4-5-20250514",
+                "model", "claude-sonnet-4-6",
                 "messages", List.of(
                     ChatCompletion.ChatMessage.builder()
                         .type(ChatCompletion.ChatMessageType.USER)
