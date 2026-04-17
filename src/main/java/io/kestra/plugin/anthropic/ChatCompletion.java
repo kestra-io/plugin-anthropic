@@ -52,7 +52,7 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: chat_completion
                     type: io.kestra.plugin.anthropic.ChatCompletion
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    model: "claude-3-5-sonnet-20241022"
+                    model: "claude-sonnet-4-6"
                     maxTokens: 1024
                     messages:
                       - type: USER
@@ -70,7 +70,7 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: code_generation
                     type: io.kestra.plugin.anthropic.ChatCompletion
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    model: "claude-3-5-sonnet-20241022"
+                    model: "claude-sonnet-4-6"
                     maxTokens: 1500
                     temperature: 0.3
                     messages:
@@ -96,7 +96,7 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: code_generation
                     type: io.kestra.plugin.anthropic.ChatCompletion
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    model: "claude-3-5-sonnet-20241022"
+                    model: "claude-sonnet-4-6"
                     maxTokens: 800
                     temperature: 0.5
                     messages:
@@ -119,7 +119,7 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: cached_chat
                     type: io.kestra.plugin.anthropic.ChatCompletion
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    model: "claude-sonnet-4-5-20250514"
+                    model: "claude-sonnet-4-6"
                     maxTokens: 1024
                     promptCaching: true
                     system: "You are a helpful assistant with extensive knowledge about Kestra, the open-source orchestration platform."
@@ -139,7 +139,7 @@ import io.kestra.core.models.annotations.PluginProperty;
                   - id: extract_data
                     type: io.kestra.plugin.anthropic.ChatCompletion
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    model: "claude-3-5-sonnet-20241022"
+                    model: "claude-sonnet-4-6"
                     maxTokens: 1024
                     messages:
                       - type: USER
