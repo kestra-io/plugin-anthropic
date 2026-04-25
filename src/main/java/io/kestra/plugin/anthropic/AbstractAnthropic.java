@@ -43,7 +43,7 @@ public abstract class AbstractAnthropic extends Task {
         description = "Maximum tokens Anthropic can generate; defaults to 1024 if unset."
     )
     @Builder.Default
-    @PluginProperty(secret = true, group = "execution")
+    @PluginProperty(group = "execution")
     protected Property<Long> maxTokens = Property.ofValue(1024L);
 
     @Schema(
