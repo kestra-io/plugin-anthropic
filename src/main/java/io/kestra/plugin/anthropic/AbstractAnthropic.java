@@ -27,7 +27,7 @@ public abstract class AbstractAnthropic extends Task {
 
     @Schema(title = "Anthropic API Key")
     @NotNull
-    @PluginProperty(group = "main")
+    @PluginProperty(secret = true, group = "main")
     protected Property<String> apiKey;
 
     @Schema(
