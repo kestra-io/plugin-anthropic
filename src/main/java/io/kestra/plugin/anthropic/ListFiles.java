@@ -3,16 +3,15 @@ package io.kestra.plugin.anthropic;
 import java.util.List;
 
 import com.anthropic.models.beta.files.FileListParams;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.kestra.core.runners.RunContext;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
-import io.kestra.core.runners.RunContext;
 
-import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;

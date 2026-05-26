@@ -57,7 +57,7 @@ public class UploadFile extends AbstractAnthropicFiles implements RunnableTask<U
         description = "Kestra internal storage URI (for example, from a previous task output)."
     )
     @NotNull
-    @PluginProperty(group = "main")
+    @PluginProperty(group = "main", internalStorageURI = true)
     private Property<String> filePath;
 
     @Schema(

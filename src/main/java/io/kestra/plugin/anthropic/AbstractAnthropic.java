@@ -1,6 +1,8 @@
 package io.kestra.plugin.anthropic;
 
 import com.anthropic.models.messages.Message;
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
@@ -76,5 +78,11 @@ public abstract class AbstractAnthropic extends Task {
         message.usage().cacheReadInputTokens().ifPresent(tokens ->
             runContext.metric(Counter.of("usage.cache.read.tokens", tokens))
         );
+    }
+
+    protected AnthropicClient buildClient(String rApiKey) {
+        return AnthropicOkHttpClient.builder()
+            .apiKey(rApiKey)
+            .build();
     }
 }

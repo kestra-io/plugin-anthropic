@@ -4,43 +4,27 @@ import java.net.URI;
 import java.nio.file.Paths;
 import java.util.Optional;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.beta.AnthropicBeta;
 import com.anthropic.models.beta.files.BetaFileScope;
 import com.anthropic.models.beta.files.FileMetadata;
 
-import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
-
-import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotNull;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractAnthropicFiles extends Task {
+public abstract class AbstractAnthropicFiles extends AbstractAnthropic {
     protected static final AnthropicBeta FILES_BETA = AnthropicBeta.FILES_API_2025_04_14;
-
-    @Schema(title = "Anthropic API Key")
-    @NotNull
-    @PluginProperty(secret = true, group = "main")
-    protected Property<String> apiKey;
-
-    protected AnthropicClient buildClient(String rApiKey) {
-        return AnthropicOkHttpClient.builder()
-            .apiKey(rApiKey)
-            .build();
-    }
+    private static final Logger LOGGER = LoggerFactory.getLogger(AbstractAnthropicFiles.class);
 
     protected String resolveFileName(RunContext runContext, URI fileUri, Optional<String> override) {
         if (override.isPresent() && !override.get().isBlank()) {
@@ -67,6 +51,11 @@ public abstract class AbstractAnthropicFiles extends Task {
     }
 
     protected FileMetadataInfo toMetadataInfo(FileMetadata metadata) {
+        if (LOGGER.isDebugEnabled()) {
+            String scopeIdLog = metadata.scope().map(BetaFileScope::id).orElse(null);
+            LOGGER.debug("Converting FileMetadata to FileMetadataInfo: id={}, filename={}, mimeType={}, size={}, scopeId={}",
+                metadata.id(), metadata.filename(), metadata.mimeType(), metadata.sizeBytes(), scopeIdLog);
+        }
         String scopeId = metadata.scope().map(BetaFileScope::id).orElse(null);
 
         return FileMetadataInfo.builder()

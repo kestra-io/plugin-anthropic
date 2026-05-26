@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.MessageCreateParams;
@@ -239,9 +238,7 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         var rTools = runContext.render(tools).asList(Tool.class);
         var rPromptCaching = runContext.render(promptCaching).as(Boolean.class).orElse(false);
 
-        var client = AnthropicOkHttpClient.builder()
-            .apiKey(rApiKey)
-            .build();
+        var client = buildClient(rApiKey);
 
         List<MessageParam> messageParams = rMessages.stream()
             .map(
