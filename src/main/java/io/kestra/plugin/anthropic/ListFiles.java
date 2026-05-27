@@ -12,7 +12,6 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 
-import jakarta.validation.constraints.Min;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;

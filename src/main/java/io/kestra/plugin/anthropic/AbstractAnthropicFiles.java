@@ -37,6 +37,10 @@ public abstract class AbstractAnthropicFiles extends AbstractAnthropic {
                 return attributes.getFileName();
             }
         } catch (Exception ignored) {
+            LOGGER.debug("Failed to read storage attributes for {}: {}", fileUri, ignored.getMessage());
+            if (LOGGER.isTraceEnabled()) {
+                LOGGER.trace("Exception while resolving filename for {}", fileUri, ignored);
+            }
             // Ignore and fall back to parsing the URI path.
         }
 
