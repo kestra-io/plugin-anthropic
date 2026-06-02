@@ -1,12 +1,9 @@
 package io.kestra.plugin.anthropic;
 
 import com.anthropic.models.messages.Message;
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -25,12 +22,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractAnthropic extends Task {
-
-    @Schema(title = "Anthropic API Key")
-    @NotNull
-    @PluginProperty(secret = true, group = "main")
-    protected Property<String> apiKey;
+public abstract class AbstractAnthropic extends AbstractAnthropicBase {
 
     @Schema(
         title = "Model",
@@ -80,9 +72,4 @@ public abstract class AbstractAnthropic extends Task {
         );
     }
 
-    protected AnthropicClient buildClient(String rApiKey) {
-        return AnthropicOkHttpClient.builder()
-            .apiKey(rApiKey)
-            .build();
-    }
 }
