@@ -40,7 +40,7 @@ import lombok.experimental.SuperBuilder;
         )
     }
 )
-public class ListModels extends AbstractAnthropicBase implements RunnableTask<ListModels.Output> {
+public class ListModels extends AbstractAnthropic implements RunnableTask<ListModels.Output> {
 
     @Override
     public Output run(RunContext runContext) throws Exception {
