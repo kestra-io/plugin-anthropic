@@ -85,5 +85,4 @@ public abstract class AbstractAnthropic extends Task {
             .apiKey(rApiKey)
             .build();
     }
-
 }
