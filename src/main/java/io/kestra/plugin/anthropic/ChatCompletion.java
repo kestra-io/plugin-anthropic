@@ -397,10 +397,10 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "The full response from Claude.")
+        @Schema(title = "The full response from Claude")
         private String rawResponse;
 
-        @Schema(title = "Assistant text extracted from the response.")
+        @Schema(title = "Assistant text extracted from the response")
         private String outputText;
 
         @Schema(title = "Tool uses", description = "List of tools that Claude requested to use, if any.")
