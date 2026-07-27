@@ -13,6 +13,7 @@ import com.anthropic.models.messages.Model;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
@@ -27,7 +28,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -36,7 +36,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 @NoArgsConstructor
 @Schema(
     title = "Send chat messages with Claude",
-    description = "Calls the Anthropic Messages API with rendered inputs, optional system prompt, and sampling controls; defaults to maxTokens 1024 and temperature 1.0 while emitting token usage counters. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages_post) for more information."
+    description = "Calls the Anthropic Messages API with rendered inputs, optional system prompt, and sampling controls; defaults to maxTokens 1024 while emitting token usage counters. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages_post) for more information."
 )
 @Plugin(
     examples = {
@@ -196,7 +196,7 @@ import io.kestra.core.models.annotations.PluginProperty;
         )
     }
 )
-public class ChatCompletion extends AbstractAnthropic implements RunnableTask<ChatCompletion.Output> {
+public class ChatCompletion extends AbstractAnthropicChat implements RunnableTask<ChatCompletion.Output> {
 
     @Schema(title = "Messages", description = "Ordered chat turns rendered from properties; include at least one USER message.")
     @NotNull
@@ -231,7 +231,7 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         var rModel = runContext.render(model).as(String.class).orElseThrow();
         var rMaxTokens = runContext.render(maxTokens).as(Long.class).orElse(1024L);
         var rMessages = runContext.render(messages).asList(ChatMessage.class);
-        var rTemperature = runContext.render(temperature).as(Double.class).orElse(1.0);
+        var rTemperature = runContext.render(temperature).as(Double.class);
         var rTopP = runContext.render(topP).as(Double.class);
         var rTopK = runContext.render(topK).as(Integer.class);
         var rSystem = runContext.render(system).as(String.class);
@@ -252,10 +252,10 @@ public class ChatCompletion extends AbstractAnthropic implements RunnableTask<Ch
         var paramsBuilder = MessageCreateParams.builder()
 
             .model(Model.of(rModel))
-            .maxTokens(rMaxTokens)
-            .temperature(rTemperature);
+            .maxTokens(rMaxTokens);
 
         rSystem.ifPresent(paramsBuilder::system);
+        rTemperature.ifPresent(paramsBuilder::temperature);
         rTopP.ifPresent(paramsBuilder::topP);
         rTopK.ifPresent(paramsBuilder::topK);
 
