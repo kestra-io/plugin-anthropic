@@ -1,6 +1,6 @@
 package io.kestra.plugin.anthropic;
 
-import com.anthropic.models.beta.files.DeletedFile;
+import com.anthropic.models.beta.files.BetaDeletedFile;
 import com.anthropic.models.beta.files.FileDeleteParams;
 
 import io.kestra.core.models.annotations.Example;
@@ -34,15 +34,15 @@ import lombok.experimental.SuperBuilder;
             title = "Delete a file",
             full = true,
             code = """
-                id: anthropic_delete_file
-                namespace: company.team
+                    id: anthropic_delete_file
+                    namespace: company.team
 
-                tasks:
-                  - id: delete_file
-                    type: io.kestra.plugin.anthropic.DeleteFile
-                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    fileId: "{{ outputs.upload.fileId }}"
-            """
+                    tasks:
+                      - id: delete_file
+                        type: io.kestra.plugin.anthropic.DeleteFile
+                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                        fileId: "{{ outputs.upload.fileId }}"
+                """
         )
     }
 )
@@ -65,9 +65,9 @@ public class DeleteFile extends AbstractAnthropicFiles implements RunnableTask<D
             .fileId(rFileId)
             .build();
 
-        DeletedFile response = client.beta().files().delete(params);
+        BetaDeletedFile response = client.beta().files().delete(params);
         boolean deleted = response.type()
-            .map(type -> type.value() == DeletedFile.Type.Value.FILE_DELETED)
+            .map(type -> type.value() == BetaDeletedFile.Type.Value.FILE_DELETED)
             .orElse(true);
 
         return Output.builder()

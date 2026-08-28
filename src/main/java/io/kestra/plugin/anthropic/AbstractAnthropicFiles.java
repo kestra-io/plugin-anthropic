@@ -4,18 +4,20 @@ import java.net.URI;
 import java.nio.file.Paths;
 import java.util.Optional;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.anthropic.models.beta.AnthropicBeta;
+import com.anthropic.models.beta.files.BetaFileMetadata;
 import com.anthropic.models.beta.files.BetaFileScope;
-import com.anthropic.models.beta.files.FileMetadata;
 
 import io.kestra.core.runners.RunContext;
+
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 @SuperBuilder
 @ToString
@@ -55,11 +57,13 @@ public abstract class AbstractAnthropicFiles extends AbstractAnthropic {
         return "upload.bin";
     }
 
-    protected FileMetadataInfo toMetadataInfo(FileMetadata metadata) {
+    protected FileMetadataInfo toMetadataInfo(BetaFileMetadata metadata) {
         if (LOGGER.isDebugEnabled()) {
             String scopeIdLog = metadata.scope().map(BetaFileScope::id).orElse(null);
-            LOGGER.debug("Converting FileMetadata to FileMetadataInfo: id={}, filename={}, mimeType={}, size={}, scopeId={}",
-                metadata.id(), metadata.filename(), metadata.mimeType(), metadata.sizeBytes(), scopeIdLog);
+            LOGGER.debug(
+                "Converting FileMetadata to FileMetadataInfo: id={}, filename={}, mimeType={}, size={}, scopeId={}",
+                metadata.id(), metadata.filename(), metadata.mimeType(), metadata.sizeBytes(), scopeIdLog
+            );
         }
         String scopeId = metadata.scope().map(BetaFileScope::id).orElse(null);
 
