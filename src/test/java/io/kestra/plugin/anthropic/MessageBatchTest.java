@@ -39,7 +39,7 @@ class MessageBatchTest {
     }
 
     @Test
-    void shouldRejectPollWithoutBatchId() {
+    void shouldRejectRetrieveWithoutBatchId() {
         var task = MessageBatch.builder()
             .apiKey(Property.ofValue("test-key"))
             .mode(Property.ofExpression("{{ mode }}"))
@@ -47,7 +47,7 @@ class MessageBatchTest {
 
         var exception = assertThrows(
             IllegalArgumentException.class,
-            () -> task.run(runContextFactory.of(Map.of("mode", "POLL")))
+            () -> task.run(runContextFactory.of(Map.of("mode", "RETRIEVE")))
         );
 
         assertThat(exception.getMessage(), containsString("batchId"));
@@ -98,7 +98,6 @@ class MessageBatchTest {
         assertThat(created.getStatus(), anyOf(is("in_progress"), is("ended"), is("canceling")));
         assertThat(created.getRequestCounts(), notNullValue());
         assertThat(created.getResults(), nullValue());
-        assertThat(created.getExpiresAt(), notNullValue());
 
         var canceled = MessageBatch.builder()
             .apiKey(Property.ofExpression("{{ apiKey }}"))
@@ -113,7 +112,7 @@ class MessageBatchTest {
 
     @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*")
     @Test
-    void shouldPollUntilEndedAndRetrieveResults() throws Exception {
+    void shouldRetrieveUntilEnded() throws Exception {
         var runContext = apiContext();
         var created = liveCreateTask(
             List.of(
@@ -123,31 +122,22 @@ class MessageBatchTest {
         ).run(runContext);
 
         var deadline = System.nanoTime() + Duration.ofMinutes(3).toNanos();
-        MessageBatch.Output polled = null;
+        MessageBatch.Output retrieved = null;
         while (System.nanoTime() < deadline) {
-            polled = MessageBatch.builder()
+            retrieved = MessageBatch.builder()
                 .apiKey(Property.ofExpression("{{ apiKey }}"))
-                .mode(Property.ofValue(MessageBatch.Mode.POLL))
+                .mode(Property.ofValue(MessageBatch.Mode.RETRIEVE))
                 .batchId(Property.ofValue(created.getBatchId()))
                 .build()
                 .run(runContext);
-            assertThat(polled.getResults(), nullValue());
-            if ("ended".equals(polled.getStatus())) {
+            if ("ended".equals(retrieved.getStatus())) {
                 break;
             }
+            assertThat(retrieved.getResults(), nullValue());
             Thread.sleep(Duration.ofSeconds(5));
         }
 
-        assertThat(polled, notNullValue());
-        assertThat(polled.getStatus(), is("ended"));
-
-        var retrieved = MessageBatch.builder()
-            .apiKey(Property.ofExpression("{{ apiKey }}"))
-            .mode(Property.ofValue(MessageBatch.Mode.RETRIEVE))
-            .batchId(Property.ofValue(created.getBatchId()))
-            .build()
-            .run(runContext);
-
+        assertThat(retrieved, notNullValue());
         assertThat(retrieved.getStatus(), is("ended"));
         assertThat(retrieved.getResultsUrl(), notNullValue());
         assertThat(

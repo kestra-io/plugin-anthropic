@@ -1,6 +1,5 @@
 package io.kestra.plugin.anthropic;
 
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -58,17 +57,18 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Create, poll, retrieve, or cancel an Anthropic Message Batch",
+    title = "Create, retrieve, or cancel an Anthropic Message Batch",
     description = """
-        Submits a batch of Messages API requests, or polls, retrieves, or cancels one that already exists.
+        Submits a batch of Messages API requests, retrieves one that already exists, or cancels it.
+        Retrieving returns status and request counts; once status is `ended`, it also returns the results URL and each request output.
+        Repeat RETRIEVE from a LoopUntil task until `status` is `ended`.
         Batches run asynchronously — most finish within an hour and all end within 24 hours — and are billed at half the real-time Messages API rate.
-        Create the batch, poll it from a LoopUntil task until `status` is `ended`, then retrieve per-request outputs.
         Refer to the [Anthropic Console](https://console.anthropic.com/settings/keys) for an API key and the [Message Batches guide](https://platform.claude.com/docs/en/build-with-claude/batch-processing) for API behavior."""
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Submit a message batch, poll until it ends, then retrieve results.",
+            title = "Submit a message batch and retrieve it until processing ends.",
             full = true,
             code = """
                 id: anthropic_message_batch
@@ -95,22 +95,16 @@ import lombok.experimental.SuperBuilder;
 
                   - id: wait_until_ended
                     type: io.kestra.plugin.core.flow.LoopUntil
-                    condition: "{{ outputs.poll.status == 'ended' }}"
+                    condition: "{{ outputs.retrieve.status == 'ended' }}"
                     checkFrequency:
                       interval: PT30S
                       maxDuration: PT24H
                     tasks:
-                      - id: poll
+                      - id: retrieve
                         type: io.kestra.plugin.anthropic.MessageBatch
                         apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                        mode: POLL
+                        mode: RETRIEVE
                         batchId: "{{ outputs.create_batch.batchId }}"
-
-                  - id: retrieve_batch
-                    type: io.kestra.plugin.anthropic.MessageBatch
-                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    mode: RETRIEVE
-                    batchId: "{{ outputs.create_batch.batchId }}"
                 """
         ),
         @Example(
@@ -163,8 +157,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         title = "Mode",
         description = """
             CREATE submits `requests` and returns a batch id.
-            POLL reads status and request counts without downloading results, for use inside LoopUntil.
-            RETRIEVE reads status and, once it is `ended`, each request result.
+            RETRIEVE reads status and request counts for a `batchId`. When status is `ended`, it also returns each request result.
             CANCEL asks Anthropic to stop a batch that has not ended yet."""
     )
     @NotNull
@@ -180,7 +173,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
 
     @Schema(
         title = "Batch ID",
-        description = "Required when mode is POLL, RETRIEVE, or CANCEL. Use the `batchId` output of CREATE."
+        description = "Required when mode is RETRIEVE or CANCEL. Use the `batchId` output of CREATE."
     )
     @PluginProperty(group = "main")
     private Property<String> batchId;
@@ -204,8 +197,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         try {
             return switch (rMode) {
                 case CREATE -> createBatch(runContext, client);
-                case POLL -> loadBatch(runContext, client, false);
-                case RETRIEVE -> loadBatch(runContext, client, true);
+                case RETRIEVE -> retrieveBatch(runContext, client);
                 case CANCEL -> cancelBatch(runContext, client);
             };
         } finally {
@@ -252,13 +244,13 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         return toOutput(batch, null);
     }
 
-    private Output loadBatch(RunContext runContext, AnthropicClient client, boolean includeResults) throws Exception {
+    private Output retrieveBatch(RunContext runContext, AnthropicClient client) throws Exception {
         var rBatchId = renderBatchId(runContext);
         var batch = client.messages().batches().retrieve(rBatchId);
         var status = batch.processingStatus().asString();
         runContext.logger().info("Anthropic message batch {} is {}.", batch.id(), status);
 
-        var results = includeResults && ENDED.equals(status) ? readResults(runContext, client, batch.id()) : null;
+        var results = ENDED.equals(status) ? readResults(runContext, client, batch.id()) : null;
         return toOutput(batch, results);
     }
 
@@ -277,7 +269,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         return runContext.render(batchId).as(String.class)
             .map(String::strip)
             .filter(id -> !id.isBlank())
-            .orElseThrow(() -> new IllegalArgumentException("batchId is required when mode is POLL, RETRIEVE, or CANCEL"));
+            .orElseThrow(() -> new IllegalArgumentException("batchId is required when mode is RETRIEVE or CANCEL"));
     }
 
     private List<RequestResult> readResults(RunContext runContext, AnthropicClient client, String messageBatchId) {
@@ -410,10 +402,6 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
             .batchId(batch.id())
             .status(batch.processingStatus().asString())
             .resultsUrl(batch.resultsUrl().orElse(null))
-            .createdAt(batch.createdAt().toString())
-            .endedAt(format(batch.endedAt()))
-            .expiresAt(batch.expiresAt().toString())
-            .cancelInitiatedAt(format(batch.cancelInitiatedAt()))
             .requestCounts(
                 RequestCounts.builder()
                     .processing(counts.processing())
@@ -425,10 +413,6 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
             )
             .results(results)
             .build();
-    }
-
-    private static String format(Optional<OffsetDateTime> value) {
-        return value.map(OffsetDateTime::toString).orElse(null);
     }
 
     private static String writeJson(Object value) {
@@ -451,7 +435,6 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
 
     public enum Mode {
         CREATE,
-        POLL,
         RETRIEVE,
         CANCEL
     }
@@ -531,21 +514,6 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
             description = "URL of the JSONL results file. Present once processing has ended."
         )
         private String resultsUrl;
-
-        @Schema(title = "Created at", description = "RFC 3339 time at which the batch was created.")
-        private String createdAt;
-
-        @Schema(title = "Ended at", description = "RFC 3339 time at which processing ended. Empty until the batch ends.")
-        private String endedAt;
-
-        @Schema(title = "Expires at", description = "RFC 3339 time at which the batch expires, 24 hours after creation.")
-        private String expiresAt;
-
-        @Schema(
-            title = "Cancel initiated at",
-            description = "RFC 3339 time at which cancellation was initiated. Empty unless the batch was canceled."
-        )
-        private String cancelInitiatedAt;
 
         @Schema(
             title = "Results",
