@@ -289,9 +289,10 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
     }
 
     private void closeResults() {
-        Optional.ofNullable(openResults)
-            .map(ref -> ref.getAndSet(null))
-            .ifPresent(StreamResponse::close);
+        var stream = openResults.getAndSet(null);
+        if (stream != null) {
+            stream.close();
+        }
     }
 
     private RequestResult toRequestResult(RunContext runContext, MessageBatchIndividualResponse item) {
