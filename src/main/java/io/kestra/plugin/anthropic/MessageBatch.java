@@ -114,12 +114,16 @@ import lombok.experimental.SuperBuilder;
                 id: anthropic_cancel_message_batch
                 namespace: company.team
 
+                inputs:
+                  - id: batchId
+                    type: STRING
+
                 tasks:
                   - id: cancel_batch
                     type: io.kestra.plugin.anthropic.MessageBatch
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
                     mode: CANCEL
-                    batchId: "{{ outputs.create_batch.batchId }}"
+                    batchId: "{{ inputs.batchId }}"
                 """
         )
     },
