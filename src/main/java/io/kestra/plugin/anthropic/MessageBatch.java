@@ -230,7 +230,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         var params = BatchCreateParams.builder();
         for (var request : rRequests) {
             runContext.validate(request);
-            var customId = request.customId().strip();
+            var customId = request.customId();
             if (!seen.add(customId)) {
                 throw new IllegalArgumentException(
                     "Duplicate customId '" + customId + "'. Each request in a batch must have a unique customId."
