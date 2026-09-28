@@ -391,12 +391,17 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
 
     private static List<MessageParam> toMessages(BatchRequest request) {
         return request.messages().stream()
-            .map(
-                message -> MessageParam.builder()
+            .map(message -> {
+                if (message.type() == null || message.content() == null) {
+                    throw new IllegalArgumentException(
+                        "Each message of request '" + request.customId() + "' must set both `type` and `content`."
+                    );
+                }
+                return MessageParam.builder()
                     .role(MessageParam.Role.of(message.type().role()))
                     .content(message.content())
-                    .build()
-            )
+                    .build();
+            })
             .toList();
     }
 
