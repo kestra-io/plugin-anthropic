@@ -9,6 +9,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.common.FetchType;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 
@@ -58,6 +59,44 @@ class MessageBatchTest {
         var task = createTask(List.of(request("  ", "Hello")));
 
         assertThrows(ConstraintViolationException.class, () -> task.run(context()));
+    }
+
+    @Test
+    void shouldRejectCustomIdOutsideAnthropicPattern() {
+        var task = createTask(List.of(request("not a valid id", "Hello")));
+
+        var exception = assertThrows(ConstraintViolationException.class, () -> task.run(context()));
+
+        assertThat(exception.getMessage(), containsString("letters, digits"));
+    }
+
+    @Test
+    void shouldRejectMessageMissingType() {
+        var task = createTask(
+            List.of(
+                MessageBatch.BatchRequest.builder()
+                    .customId("missing-type")
+                    .model("claude-sonnet-4-6")
+                    .messages(List.of(ChatCompletion.ChatMessage.builder().content("hi").build()))
+                    .build()
+            )
+        );
+
+        var exception = assertThrows(IllegalArgumentException.class, () -> task.run(context()));
+
+        assertThat(exception.getMessage(), containsString("type"));
+        assertThat(exception.getMessage(), containsString("content"));
+    }
+
+    @Test
+    void shouldDefaultFetchTypeToStore() throws Exception {
+        var task = MessageBatch.builder()
+            .apiKey(Property.ofValue("test-key"))
+            .mode(Property.ofValue(MessageBatch.Mode.RETRIEVE))
+            .batchId(Property.ofValue("msgbatch_test"))
+            .build();
+
+        assertThat(context().render(task.getFetchType()).as(FetchType.class).orElseThrow(), is(FetchType.STORE));
     }
 
     @Test
@@ -127,6 +166,7 @@ class MessageBatchTest {
             retrieved = MessageBatch.builder()
                 .apiKey(Property.ofExpression("{{ apiKey }}"))
                 .mode(Property.ofValue(MessageBatch.Mode.RETRIEVE))
+                .fetchType(Property.ofValue(FetchType.FETCH))
                 .batchId(Property.ofValue(created.getBatchId()))
                 .build()
                 .run(runContext);
@@ -146,6 +186,18 @@ class MessageBatchTest {
         );
         assertThat(retrieved.getResults(), everyItem(hasProperty("type", is("succeeded"))));
         assertThat(retrieved.getResults(), everyItem(hasProperty("outputText", not(blankOrNullString()))));
+
+        var stored = MessageBatch.builder()
+            .apiKey(Property.ofExpression("{{ apiKey }}"))
+            .mode(Property.ofValue(MessageBatch.Mode.RETRIEVE))
+            .batchId(Property.ofValue(created.getBatchId()))
+            .build()
+            .run(runContext);
+
+        assertThat(stored.getStatus(), is("ended"));
+        assertThat(stored.getResults(), nullValue());
+        assertThat(stored.getUri(), notNullValue());
+        assertThat(stored.getSize(), is(2L));
     }
 
     private MessageBatch createTask(List<MessageBatch.BatchRequest> requests) {
