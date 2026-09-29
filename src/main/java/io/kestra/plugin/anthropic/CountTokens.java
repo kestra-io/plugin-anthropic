@@ -27,17 +27,17 @@ import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
 @ToString
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Count input tokens for a Claude request",
-    description = "Calls the Anthropic token-count endpoint (`POST /v1/messages/count_tokens`) with the same rendered messages, system prompt, tools, and model as ChatCompletion. Returns only the input token estimate. Does not create a message or call the model. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [token counting documentation](https://platform.claude.com/docs/en/build-with-claude/token-counting) for more information."
+    title = "Count input tokens with Claude",
+    description = "Calls the Anthropic token counting API with rendered messages, optional system prompt, and tools, and returns the input token count. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages-count-tokens) for more information."
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Count tokens before a chat completion.",
+            title = "Count tokens using Claude.",
             full = true,
             code = """
                 id: anthropic_count_tokens
@@ -54,7 +54,7 @@ import lombok.experimental.SuperBuilder;
                 """
         ),
         @Example(
-            title = "Count tokens for a system prompt and tools.",
+            title = "Count tokens with tools",
             full = true,
             code = """
                 id: anthropic_count_tokens_with_tools
@@ -65,11 +65,10 @@ import lombok.experimental.SuperBuilder;
                     type: io.kestra.plugin.anthropic.CountTokens
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
                     model: "claude-sonnet-4-6"
-                    system: "Extract structured facts. Do not guess missing fields."
                     messages:
                       - type: USER
                         content: |
-                          Extract the person from this text:
+                          Extract the following information from this text:
                           "John Doe is 30 years old and works as a Software Engineer in San Francisco."
                     tools:
                       - name: extract_person_info
@@ -83,6 +82,12 @@ import lombok.experimental.SuperBuilder;
                             age:
                               type: integer
                               description: "The person's age"
+                            occupation:
+                              type: string
+                              description: "The person's job title"
+                            location:
+                              type: string
+                              description: "The person's location"
                           required:
                             - name
                             - age
@@ -92,12 +97,11 @@ import lombok.experimental.SuperBuilder;
 )
 public class CountTokens extends AbstractAnthropic implements RunnableTask<CountTokens.Output> {
 
-    // ponytail: tests set this to a local stub. Ceiling is one override per thread; production leaves it unset.
     static final ThreadLocal<String> baseUrlOverride = new ThreadLocal<>();
 
     @Schema(
         title = "Model",
-        description = "Claude model name used to estimate tokens (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
+        description = "Claude model name to invoke (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
     )
     @NotNull
     @PluginProperty(group = "main")
@@ -108,13 +112,13 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
     @PluginProperty(group = "main")
     private Property<List<ChatMessage>> messages;
 
-    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before the token count.")
+    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
     @PluginProperty(group = "advanced")
     private Property<String> system;
 
     @Schema(
         title = "Tools",
-        description = "Optional tools included in the estimate; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema. Tools are counted, not invoked."
+        description = "Optional tools Claude can invoke; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts."
     )
     @PluginProperty(group = "destination")
     private Property<List<Tool>> tools;
@@ -127,7 +131,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         var rSystem = runContext.render(system).as(String.class);
         var rTools = runContext.render(tools).asList(Tool.class);
 
-        var client = client(rApiKey);
+        var client = buildClient(rApiKey);
 
         List<MessageParam> messageParams = rMessages.stream()
             .map(
@@ -139,66 +143,77 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
             .toList();
 
         var paramsBuilder = MessageCountTokensParams.builder()
-            .model(Model.of(rModel))
-            .messages(messageParams);
+
+            .model(Model.of(rModel));
 
         rSystem.ifPresent(paramsBuilder::system);
 
-        for (Tool tool : rTools) {
-            paramsBuilder.addTool(toSdkTool(tool));
+        // Add tools if provided
+        if (!rTools.isEmpty()) {
+            List<com.anthropic.models.messages.MessageCountTokensTool> toolParams = rTools.stream()
+                .map(tool ->
+                {
+                    var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
+
+                    // Build input schema from the provided map
+                    if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
+                        var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
+
+                        // Convert properties to JsonValue
+                        properties.forEach((key, value) ->
+                        {
+                            com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
+                            propertiesBuilder.putAdditionalProperty(key, jsonValue);
+                        });
+
+                        inputSchemaBuilder.properties(propertiesBuilder.build());
+
+                        // Add required fields if present
+                        if (tool.inputSchema.containsKey("required")) {
+                            @SuppressWarnings("unchecked")
+                            List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
+                            inputSchemaBuilder.required(requiredFields);
+                        }
+                    }
+
+                    var toolBuilder = com.anthropic.models.messages.Tool.builder()
+                        .name(tool.name)
+                        .inputSchema(inputSchemaBuilder.build());
+
+                    if (tool.description != null && !tool.description.isEmpty()) {
+                        toolBuilder.description(tool.description);
+                    }
+
+                    return com.anthropic.models.messages.MessageCountTokensTool.ofTool(toolBuilder.build());
+                })
+                .toList();
+            paramsBuilder.tools(toolParams);
         }
 
-        var counted = client.messages().countTokens(paramsBuilder.build());
+        paramsBuilder.messages(messageParams);
+
+        var params = paramsBuilder.build();
+        var response = client.messages().countTokens(params);
 
         return Output.builder()
-            .inputTokens(counted.inputTokens())
+            .inputTokens(response.inputTokens())
             .build();
     }
 
-    private AnthropicClient client(String rApiKey) {
+    @Override
+    protected AnthropicClient buildClient(String rApiKey) {
         String baseUrl = baseUrlOverride.get();
         if (baseUrl == null) {
-            return buildClient(rApiKey);
+            return super.buildClient(rApiKey);
         }
+
         return AnthropicOkHttpClient.builder()
             .apiKey(rApiKey)
             .baseUrl(baseUrl)
             .maxRetries(0)
             .build();
-    }
-
-    private com.anthropic.models.messages.Tool toSdkTool(Tool tool) {
-        var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
-
-        if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
-            var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
-
-            properties.forEach((key, value) ->
-            {
-                com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
-                propertiesBuilder.putAdditionalProperty(key, jsonValue);
-            });
-
-            inputSchemaBuilder.properties(propertiesBuilder.build());
-
-            if (tool.inputSchema.containsKey("required")) {
-                @SuppressWarnings("unchecked")
-                List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
-                inputSchemaBuilder.required(requiredFields);
-            }
-        }
-
-        var toolBuilder = com.anthropic.models.messages.Tool.builder()
-            .name(tool.name)
-            .inputSchema(inputSchemaBuilder.build());
-
-        if (tool.description != null && !tool.description.isEmpty()) {
-            toolBuilder.description(tool.description);
-        }
-
-        return toolBuilder.build();
     }
 
     @Builder
@@ -232,10 +247,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(
-            title = "Input tokens",
-            description = "Estimated number of input tokens for the given messages, system prompt, and tools."
-        )
+        @Schema(title = "Input tokens", description = "Number of input tokens for the given messages, system prompt, and tools.")
         private Long inputTokens;
     }
 }

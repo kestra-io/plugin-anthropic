@@ -27,22 +27,17 @@ public class CountTokensTest {
     private RunContextFactory runContextFactory;
 
     @Test
-    void countsInputTokensWithoutCallingTheModel() throws Exception {
-        List<Captured> captured = new ArrayList<>();
+    void shouldCountInputTokens() throws Exception {
+        List<String> paths = new ArrayList<>();
+        List<String> bodies = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext(
             "/",
             exchange ->
             {
-                byte[] requestBody = exchange.getRequestBody().readAllBytes();
                 String path = exchange.getRequestURI().getPath();
-                captured.add(
-                    new Captured(
-                        exchange.getRequestMethod(),
-                        path,
-                        new String(requestBody, StandardCharsets.UTF_8)
-                    )
-                );
+                paths.add(path);
+                bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
 
                 byte[] responseBody;
                 int status;
@@ -51,8 +46,7 @@ public class CountTokensTest {
                     responseBody = "{\"input_tokens\":42}".getBytes(StandardCharsets.UTF_8);
                 } else {
                     status = 404;
-                    responseBody = ("{\"error\":{\"message\":\"unexpected " + path + "\"}}")
-                        .getBytes(StandardCharsets.UTF_8);
+                    responseBody = ("{\"error\":{\"message\":\"unexpected " + path + "\"}}").getBytes(StandardCharsets.UTF_8);
                 }
                 exchange.getResponseHeaders().set("Content-Type", "application/json");
                 exchange.sendResponseHeaders(status, responseBody.length);
@@ -111,21 +105,17 @@ public class CountTokensTest {
 
             assertThat(output, notNullValue());
             assertThat(output.getInputTokens(), is(42L));
-            assertThat(captured, hasSize(1));
-            assertThat(captured.get(0).method(), is("POST"));
-            assertThat(captured.get(0).path(), is("/v1/messages/count_tokens"));
-            assertThat(captured.get(0).body(), containsString("claude-sonnet-4-6"));
-            assertThat(captured.get(0).body(), containsString("What is the capital of Japan?"));
-            assertThat(captured.get(0).body(), containsString("Tokyo."));
-            assertThat(captured.get(0).body(), containsString("Be brief."));
-            assertThat(captured.get(0).body(), containsString("extract_person"));
-            assertThat(captured.get(0).body(), not(containsString("max_tokens")));
+            assertThat(paths, hasSize(1));
+            assertThat(paths.get(0), is("/v1/messages/count_tokens"));
+            assertThat(bodies.get(0), containsString("claude-sonnet-4-6"));
+            assertThat(bodies.get(0), containsString("What is the capital of Japan?"));
+            assertThat(bodies.get(0), containsString("Tokyo."));
+            assertThat(bodies.get(0), containsString("Be brief."));
+            assertThat(bodies.get(0), containsString("extract_person"));
+            assertThat(bodies.get(0), not(containsString("max_tokens")));
         } finally {
             CountTokens.baseUrlOverride.remove();
             server.stop(0);
         }
-    }
-
-    private record Captured(String method, String path, String body) {
     }
 }

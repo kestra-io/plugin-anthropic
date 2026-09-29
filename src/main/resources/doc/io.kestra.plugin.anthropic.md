@@ -10,7 +10,7 @@ Set `apiKey` to your Anthropic API key. Store it in a [secret](https://kestra.io
 
 `ChatCompletion` sends a prompt to a Claude model and returns the response. Set `model` to choose the model (e.g., `claude-opus-4-7`, `claude-sonnet-4-6`) and `maxTokens` to cap the response length. It returns the completion text, any tool uses, the stop reason, and cache-token counts as outputs, and emits input/output/cache token-usage metrics.
 
-`CountTokens` estimates input tokens for the same `messages`, `system`, `tools`, and `model` before a completion. It calls the token-count endpoint and returns `inputTokens` only. It does not call the model.
+`CountTokens` counts input tokens for the same messages, system prompt, and tools you would send to `ChatCompletion`. Set `model` to choose the model. It returns `inputTokens`.
 
 `ListModels` lists the Claude models available to your API key.
 
