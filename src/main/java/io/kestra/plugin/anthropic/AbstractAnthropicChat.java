@@ -1,11 +1,7 @@
 package io.kestra.plugin.anthropic;
 
-import com.anthropic.models.messages.Message;
-
 import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.RunContext;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Max;
@@ -59,15 +55,4 @@ public abstract class AbstractAnthropicChat extends AbstractAnthropic {
     )
     @PluginProperty(group = "advanced")
     protected Property<Integer> topK;
-
-    protected void sendMetrics(RunContext runContext, Message message) {
-        runContext.metric(Counter.of("usage.input.tokens", message.usage().inputTokens()));
-        runContext.metric(Counter.of("usage.output.tokens", message.usage().outputTokens()));
-        message.usage().cacheCreationInputTokens().ifPresent(
-            tokens -> runContext.metric(Counter.of("usage.cache.creation.tokens", tokens))
-        );
-        message.usage().cacheReadInputTokens().ifPresent(
-            tokens -> runContext.metric(Counter.of("usage.cache.read.tokens", tokens))
-        );
-    }
 }
