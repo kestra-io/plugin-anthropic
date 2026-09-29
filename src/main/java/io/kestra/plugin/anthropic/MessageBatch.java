@@ -201,7 +201,6 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
                 case CANCEL -> cancelBatch(runContext, client);
             };
         } finally {
-            closeResults();
             client.close();
         }
     }
