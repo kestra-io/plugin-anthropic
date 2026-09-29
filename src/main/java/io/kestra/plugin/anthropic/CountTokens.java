@@ -3,6 +3,8 @@ package io.kestra.plugin.anthropic;
 import java.util.List;
 import java.util.Map;
 
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.messages.MessageCountTokensParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
@@ -90,6 +92,9 @@ import lombok.experimental.SuperBuilder;
 )
 public class CountTokens extends AbstractAnthropic implements RunnableTask<CountTokens.Output> {
 
+    // ponytail: tests set this to a local stub. Ceiling is one override per thread; production leaves it unset.
+    static final ThreadLocal<String> baseUrlOverride = new ThreadLocal<>();
+
     @Schema(
         title = "Model",
         description = "Claude model name used to estimate tokens (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
@@ -122,7 +127,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         var rSystem = runContext.render(system).as(String.class);
         var rTools = runContext.render(tools).asList(Tool.class);
 
-        var client = buildClient(rApiKey);
+        var client = client(rApiKey);
 
         List<MessageParam> messageParams = rMessages.stream()
             .map(
@@ -147,6 +152,18 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
 
         return Output.builder()
             .inputTokens(counted.inputTokens())
+            .build();
+    }
+
+    private AnthropicClient client(String rApiKey) {
+        String baseUrl = baseUrlOverride.get();
+        if (baseUrl == null) {
+            return buildClient(rApiKey);
+        }
+        return AnthropicOkHttpClient.builder()
+            .apiKey(rApiKey)
+            .baseUrl(baseUrl)
+            .maxRetries(0)
             .build();
     }
 

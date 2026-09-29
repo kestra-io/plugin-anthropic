@@ -7,19 +7,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
-import com.sun.net.httpserver.HttpServer;
-
 import org.junit.jupiter.api.Test;
+
+import com.sun.net.httpserver.HttpServer;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 
 import jakarta.inject.Inject;
-import lombok.NoArgsConstructor;
-import lombok.experimental.SuperBuilder;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -65,6 +61,7 @@ public class CountTokensTest {
             }
         );
         server.start();
+        CountTokens.baseUrlOverride.set("http://127.0.0.1:" + server.getAddress().getPort());
 
         try {
             Map<String, Object> schema = new HashMap<>();
@@ -102,13 +99,12 @@ public class CountTokensTest {
                 )
             );
 
-            var task = StubbedCountTokens.builder()
+            var task = CountTokens.builder()
                 .apiKey(Property.ofExpression("{{ apiKey }}"))
                 .model(Property.ofExpression("{{ model }}"))
                 .system(Property.ofExpression("{{ system }}"))
                 .messages(Property.ofExpression("{{ messages }}"))
                 .tools(Property.ofExpression("{{ tools }}"))
-                .baseUrl("http://127.0.0.1:" + server.getAddress().getPort())
                 .build();
 
             var output = task.run(runContext);
@@ -125,25 +121,11 @@ public class CountTokensTest {
             assertThat(captured.get(0).body(), containsString("extract_person"));
             assertThat(captured.get(0).body(), not(containsString("max_tokens")));
         } finally {
+            CountTokens.baseUrlOverride.remove();
             server.stop(0);
         }
     }
 
     private record Captured(String method, String path, String body) {
-    }
-
-    @SuperBuilder
-    @NoArgsConstructor
-    static class StubbedCountTokens extends CountTokens {
-        private String baseUrl;
-
-        @Override
-        protected AnthropicClient buildClient(String rApiKey) {
-            return AnthropicOkHttpClient.builder()
-                .apiKey(rApiKey)
-                .baseUrl(baseUrl)
-                .maxRetries(0)
-                .build();
-        }
     }
 }
