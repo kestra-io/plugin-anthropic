@@ -1,11 +1,9 @@
 package io.kestra.plugin.anthropic;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import com.anthropic.models.messages.CacheControlEphemeral;
-import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
@@ -315,43 +313,11 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
 
         sendMetrics(runContext, response);
 
-        StringBuilder outputText = new StringBuilder();
-        List<ToolUse> toolUses = new ArrayList<>();
-
-        for (ContentBlock block : response.content()) {
-            if (block.text().isPresent()) {
-                var textBlock = block.text().get();
-                outputText.append(textBlock.text());
-            } else if (block.toolUse().isPresent()) {
-                var toolUseBlock = block.toolUse().get();
-
-                // Convert JsonValue input to Map
-                Map<String, Object> inputMap = null;
-                try {
-                    com.anthropic.core.JsonValue inputJson = toolUseBlock._input();
-                    String inputJsonString = JacksonMapper.ofJson().writeValueAsString(inputJson);
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> parsedInput = JacksonMapper.ofJson().readValue(inputJsonString, Map.class);
-                    inputMap = parsedInput;
-                } catch (Exception e) {
-                    // If conversion fails, leave input as null
-                }
-
-                toolUses.add(
-                    ToolUse.builder()
-                        .id(toolUseBlock.id())
-                        .name(toolUseBlock.name())
-                        .input(inputMap)
-                        .build()
-                );
-            }
-        }
-
         return Output.builder()
             .rawResponse(JacksonMapper.ofJson().writeValueAsString(response))
-            .outputText(outputText.toString())
-            .toolUses(toolUses.isEmpty() ? null : toolUses)
-            .stopReason(response.stopReason().toString())
+            .outputText(outputText(response))
+            .toolUses(toolUses(response))
+            .stopReason(stopReason(response))
             .cacheCreationInputTokens(response.usage().cacheCreationInputTokens().orElse(null))
             .cacheReadInputTokens(response.usage().cacheReadInputTokens().orElse(null))
             .build();
