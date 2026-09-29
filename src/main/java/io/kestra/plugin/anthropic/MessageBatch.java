@@ -114,12 +114,16 @@ import lombok.experimental.SuperBuilder;
                 id: anthropic_cancel_message_batch
                 namespace: company.team
 
+                inputs:
+                  - id: batchId
+                    type: STRING
+
                 tasks:
                   - id: cancel_batch
                     type: io.kestra.plugin.anthropic.MessageBatch
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
                     mode: CANCEL
-                    batchId: "{{ outputs.create_batch.batchId }}"
+                    batchId: "{{ inputs.batchId }}"
                 """
         )
     },
@@ -225,7 +229,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         var params = BatchCreateParams.builder();
         for (var request : rRequests) {
             runContext.validate(request);
-            var customId = request.customId().strip();
+            var customId = request.customId();
             if (!seen.add(customId)) {
                 throw new IllegalArgumentException(
                     "Duplicate customId '" + customId + "'. Each request in a batch must have a unique customId."
@@ -284,9 +288,10 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
     }
 
     private void closeResults() {
-        Optional.ofNullable(openResults)
-            .map(ref -> ref.getAndSet(null))
-            .ifPresent(StreamResponse::close);
+        var stream = openResults.getAndSet(null);
+        if (stream != null) {
+            stream.close();
+        }
     }
 
     private RequestResult toRequestResult(RunContext runContext, MessageBatchIndividualResponse item) {
@@ -386,12 +391,17 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
 
     private static List<MessageParam> toMessages(BatchRequest request) {
         return request.messages().stream()
-            .map(
-                message -> MessageParam.builder()
+            .map(message -> {
+                if (message.type() == null || message.content() == null) {
+                    throw new IllegalArgumentException(
+                        "Each message of request '" + request.customId() + "' must set both `type` and `content`."
+                    );
+                }
+                return MessageParam.builder()
                     .role(MessageParam.Role.of(message.type().role()))
                     .content(message.content())
-                    .build()
-            )
+                    .build();
+            })
             .toList();
     }
 
