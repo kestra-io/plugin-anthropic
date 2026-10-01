@@ -28,6 +28,7 @@ public class CountTokensTest {
 
     @Test
     void shouldCountInputTokens() throws Exception {
+        List<String> methods = new ArrayList<>();
         List<String> paths = new ArrayList<>();
         List<String> bodies = new ArrayList<>();
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -36,6 +37,7 @@ public class CountTokensTest {
             exchange ->
             {
                 String path = exchange.getRequestURI().getPath();
+                methods.add(exchange.getRequestMethod());
                 paths.add(path);
                 bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
 
@@ -106,6 +108,7 @@ public class CountTokensTest {
             assertThat(output, notNullValue());
             assertThat(output.getInputTokens(), is(42L));
             assertThat(paths, hasSize(1));
+            assertThat(methods.get(0), is("POST"));
             assertThat(paths.get(0), is("/v1/messages/count_tokens"));
             assertThat(bodies.get(0), containsString("claude-sonnet-4-6"));
             assertThat(bodies.get(0), containsString("What is the capital of Japan?"));

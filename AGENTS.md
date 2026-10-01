@@ -3,7 +3,7 @@
 ## What
 
 - Provides plugin components under `io.kestra.plugin.anthropic`.
-- Includes classes such as `ChatCompletion`.
+- Includes classes such as `ChatCompletion`, `MessageBatch`, and `CountTokens`.
 
 ## Why
 
@@ -26,6 +26,8 @@ Infrastructure dependencies (Docker Compose services):
 ### Key Plugin Classes
 
 - `io.kestra.plugin.anthropic.ChatCompletion`
+- `io.kestra.plugin.anthropic.MessageBatch`
+- `io.kestra.plugin.anthropic.CountTokens`
 
 ### Project Structure
 

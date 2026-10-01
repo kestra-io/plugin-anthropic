@@ -31,8 +31,8 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Count input tokens with Claude",
-    description = "Calls the Anthropic token counting API with rendered messages, optional system prompt, and tools, and returns the input token count. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages-count-tokens) for more information."
+    title = "Count input tokens for a Claude request",
+    description = "Calls the Anthropic token-count endpoint (`POST /v1/messages/count_tokens`) with the same rendered messages, system prompt, tools, and model as ChatCompletion. Returns only `inputTokens`. Does not create a message or call the model. A later task can read `{{ outputs.<task-id>.inputTokens }}` to gate on cost or context size before ChatCompletion. Refer to the [Anthropic Console Settings](https://console.anthropic.com/settings/keys) to create an API key and the [Anthropic API documentation](https://docs.anthropic.com/claude/reference/messages-count-tokens) for more information."
 )
 @Plugin(
     examples = {
@@ -92,6 +92,35 @@ import lombok.experimental.SuperBuilder;
                             - name
                             - age
                 """
+        ),
+        @Example(
+            title = "Count tokens, then complete only when the prompt fits.",
+            full = true,
+            code = """
+                id: anthropic_count_tokens_before_completion
+                namespace: company.team
+
+                tasks:
+                  - id: count_tokens
+                    type: io.kestra.plugin.anthropic.CountTokens
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: "claude-sonnet-4-6"
+                    system: "Answer in one word."
+                    messages:
+                      - type: USER
+                        content: "What is the capital of Japan? Answer with a unique word and without any punctuation."
+
+                  - id: chat_completion
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    runIf: "{{ outputs.count_tokens.inputTokens < 8000 }}"
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: "claude-sonnet-4-6"
+                    maxTokens: 1024
+                    system: "Answer in one word."
+                    messages:
+                      - type: USER
+                        content: "What is the capital of Japan? Answer with a unique word and without any punctuation."
+                """
         )
     }
 )
@@ -101,7 +130,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
 
     @Schema(
         title = "Model",
-        description = "Claude model name to invoke (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
+        description = "Claude model name used to estimate tokens (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
     )
     @NotNull
     @PluginProperty(group = "main")
@@ -112,13 +141,13 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
     @PluginProperty(group = "main")
     private Property<List<ChatMessage>> messages;
 
-    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
+    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before the token count.")
     @PluginProperty(group = "advanced")
     private Property<String> system;
 
     @Schema(
         title = "Tools",
-        description = "Optional tools Claude can invoke; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts."
+        description = "Optional tools included in the estimate; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts. Tools are counted, not invoked."
     )
     @PluginProperty(group = "destination")
     private Property<List<Tool>> tools;
@@ -247,7 +276,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
-        @Schema(title = "Input tokens", description = "Number of input tokens for the given messages, system prompt, and tools.")
+        @Schema(title = "Input tokens", description = "Estimated number of input tokens for the given messages, system prompt, and tools.")
         private Long inputTokens;
     }
 }
