@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 
 import com.anthropic.client.AnthropicClient;
-import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.anthropic.models.messages.MessageCountTokensParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
@@ -126,8 +125,6 @@ import lombok.experimental.SuperBuilder;
 )
 public class CountTokens extends AbstractAnthropic implements RunnableTask<CountTokens.Output> {
 
-    static final ThreadLocal<String> baseUrlOverride = new ThreadLocal<>();
-
     @Schema(
         title = "Model",
         description = "Claude model name used to estimate tokens (e.g., claude-sonnet-4-6); must match an Anthropic model available to your API key."
@@ -154,95 +151,97 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var rModel = runContext.render(model).as(String.class).orElseThrow();
+        var rApiKey = runContext.render(apiKey).as(String.class)
+            .map(String::strip)
+            .filter(value -> !value.isBlank())
+            .orElseThrow(() -> new IllegalArgumentException("apiKey is required"));
+        var rModel = runContext.render(model).as(String.class)
+            .map(String::strip)
+            .filter(value -> !value.isBlank())
+            .orElseThrow(() -> new IllegalArgumentException("model is required"));
         var rMessages = runContext.render(messages).asList(ChatMessage.class);
+        if (rMessages.isEmpty()) {
+            throw new IllegalArgumentException("messages is required");
+        }
         var rSystem = runContext.render(system).as(String.class);
         var rTools = runContext.render(tools).asList(Tool.class);
 
-        var client = buildClient(rApiKey);
-
-        List<MessageParam> messageParams = rMessages.stream()
-            .map(
-                message -> MessageParam.builder()
-                    .role(MessageParam.Role.of(message.type.role()))
-                    .content(message.content)
-                    .build()
-            )
-            .toList();
-
-        var paramsBuilder = MessageCountTokensParams.builder()
-
-            .model(Model.of(rModel));
-
-        rSystem.ifPresent(paramsBuilder::system);
-
-        // Add tools if provided
-        if (!rTools.isEmpty()) {
-            List<com.anthropic.models.messages.MessageCountTokensTool> toolParams = rTools.stream()
-                .map(tool ->
-                {
-                    var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
-
-                    // Build input schema from the provided map
-                    if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
-                        var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
-
-                        // Convert properties to JsonValue
-                        properties.forEach((key, value) ->
-                        {
-                            com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
-                            propertiesBuilder.putAdditionalProperty(key, jsonValue);
-                        });
-
-                        inputSchemaBuilder.properties(propertiesBuilder.build());
-
-                        // Add required fields if present
-                        if (tool.inputSchema.containsKey("required")) {
-                            @SuppressWarnings("unchecked")
-                            List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
-                            inputSchemaBuilder.required(requiredFields);
-                        }
-                    }
-
-                    var toolBuilder = com.anthropic.models.messages.Tool.builder()
-                        .name(tool.name)
-                        .inputSchema(inputSchemaBuilder.build());
-
-                    if (tool.description != null && !tool.description.isEmpty()) {
-                        toolBuilder.description(tool.description);
-                    }
-
-                    return com.anthropic.models.messages.MessageCountTokensTool.ofTool(toolBuilder.build());
-                })
+        var client = anthropicClient(rApiKey);
+        try {
+            List<MessageParam> messageParams = rMessages.stream()
+                .map(
+                    message -> MessageParam.builder()
+                        .role(MessageParam.Role.of(message.type.role()))
+                        .content(message.content)
+                        .build()
+                )
                 .toList();
-            paramsBuilder.tools(toolParams);
+
+            var paramsBuilder = MessageCountTokensParams.builder()
+
+                .model(Model.of(rModel));
+
+            rSystem.ifPresent(paramsBuilder::system);
+
+            // Add tools if provided
+            if (!rTools.isEmpty()) {
+                List<com.anthropic.models.messages.MessageCountTokensTool> toolParams = rTools.stream()
+                    .map(tool ->
+                    {
+                        var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
+
+                        // Build input schema from the provided map
+                        if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
+                            var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
+
+                            // Convert properties to JsonValue
+                            properties.forEach((key, value) ->
+                            {
+                                com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
+                                propertiesBuilder.putAdditionalProperty(key, jsonValue);
+                            });
+
+                            inputSchemaBuilder.properties(propertiesBuilder.build());
+
+                            // Add required fields if present
+                            if (tool.inputSchema.containsKey("required")) {
+                                @SuppressWarnings("unchecked")
+                                List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
+                                inputSchemaBuilder.required(requiredFields);
+                            }
+                        }
+
+                        var toolBuilder = com.anthropic.models.messages.Tool.builder()
+                            .name(tool.name)
+                            .inputSchema(inputSchemaBuilder.build());
+
+                        if (tool.description != null && !tool.description.isEmpty()) {
+                            toolBuilder.description(tool.description);
+                        }
+
+                        return com.anthropic.models.messages.MessageCountTokensTool.ofTool(toolBuilder.build());
+                    })
+                    .toList();
+                paramsBuilder.tools(toolParams);
+            }
+
+            paramsBuilder.messages(messageParams);
+
+            var params = paramsBuilder.build();
+            var response = client.messages().countTokens(params);
+
+            return Output.builder()
+                .inputTokens(response.inputTokens())
+                .build();
+        } finally {
+            client.close();
         }
-
-        paramsBuilder.messages(messageParams);
-
-        var params = paramsBuilder.build();
-        var response = client.messages().countTokens(params);
-
-        return Output.builder()
-            .inputTokens(response.inputTokens())
-            .build();
     }
 
-    @Override
-    protected AnthropicClient buildClient(String rApiKey) {
-        String baseUrl = baseUrlOverride.get();
-        if (baseUrl == null) {
-            return super.buildClient(rApiKey);
-        }
-
-        return AnthropicOkHttpClient.builder()
-            .apiKey(rApiKey)
-            .baseUrl(baseUrl)
-            .maxRetries(0)
-            .build();
+    protected AnthropicClient anthropicClient(String apiKey) {
+        return buildClient(apiKey);
     }
 
     @Builder

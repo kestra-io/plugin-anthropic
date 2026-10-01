@@ -9,6 +9,8 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.client.okhttp.AnthropicOkHttpClient;
 import com.sun.net.httpserver.HttpServer;
 
 import io.kestra.core.junit.annotations.KestraTest;
@@ -16,9 +18,12 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 
 import jakarta.inject.Inject;
+import lombok.NoArgsConstructor;
+import lombok.experimental.SuperBuilder;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 public class CountTokensTest {
@@ -57,7 +62,7 @@ public class CountTokensTest {
             }
         );
         server.start();
-        CountTokens.baseUrlOverride.set("http://127.0.0.1:" + server.getAddress().getPort());
+        var baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
 
         try {
             Map<String, Object> schema = new HashMap<>();
@@ -95,7 +100,8 @@ public class CountTokensTest {
                 )
             );
 
-            var task = CountTokens.builder()
+            var task = LocalCountTokens.builder()
+                .baseUrl(baseUrl)
                 .apiKey(Property.ofExpression("{{ apiKey }}"))
                 .model(Property.ofExpression("{{ model }}"))
                 .system(Property.ofExpression("{{ system }}"))
@@ -117,8 +123,70 @@ public class CountTokensTest {
             assertThat(bodies.get(0), containsString("extract_person"));
             assertThat(bodies.get(0), not(containsString("max_tokens")));
         } finally {
-            CountTokens.baseUrlOverride.remove();
             server.stop(0);
+        }
+    }
+
+    @Test
+    void shouldRejectMissingApiKey() {
+        var task = CountTokens.builder()
+            .model(Property.ofValue("claude-sonnet-4-6"))
+            .messages(oneMessage())
+            .build();
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), containsString("apiKey"));
+    }
+
+    @Test
+    void shouldRejectBlankModel() {
+        var task = CountTokens.builder()
+            .apiKey(Property.ofValue("test-key"))
+            .model(Property.ofValue(""))
+            .messages(oneMessage())
+            .build();
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), containsString("model"));
+    }
+
+    @Test
+    void shouldRejectMissingMessages() {
+        var task = CountTokens.builder()
+            .apiKey(Property.ofValue("test-key"))
+            .model(Property.ofValue("claude-sonnet-4-6"))
+            .build();
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), containsString("messages"));
+    }
+
+    private Property<List<CountTokens.ChatMessage>> oneMessage() {
+        return Property.ofValue(
+            List.of(
+                CountTokens.ChatMessage.builder()
+                    .type(CountTokens.ChatMessageType.USER)
+                    .content("Hi")
+                    .build()
+            )
+        );
+    }
+
+    @SuperBuilder
+    @NoArgsConstructor
+    public static final class LocalCountTokens extends CountTokens {
+        private String baseUrl;
+
+        @Override
+        protected AnthropicClient anthropicClient(String apiKey) {
+            return AnthropicOkHttpClient.builder()
+                .apiKey(apiKey)
+                .baseUrl(baseUrl)
+                .maxRetries(0)
+                .build();
         }
     }
 }
