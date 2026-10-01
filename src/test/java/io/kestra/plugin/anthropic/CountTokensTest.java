@@ -75,7 +75,7 @@ public class CountTokensTest {
             );
             schema.put("required", List.of("name", "age"));
 
-            var tool = CountTokens.Tool.builder()
+            var tool = ChatCompletion.Tool.builder()
                 .name("extract_person")
                 .description("Extract person info")
                 .inputSchema(schema)
@@ -87,12 +87,12 @@ public class CountTokensTest {
                     "model", "claude-sonnet-4-6",
                     "system", "Be brief.",
                     "messages", List.of(
-                        CountTokens.ChatMessage.builder()
-                            .type(CountTokens.ChatMessageType.USER)
+                        ChatCompletion.ChatMessage.builder()
+                            .type(ChatCompletion.ChatMessageType.USER)
                             .content("What is the capital of Japan?")
                             .build(),
-                        CountTokens.ChatMessage.builder()
-                            .type(CountTokens.ChatMessageType.ASSISTANT)
+                        ChatCompletion.ChatMessage.builder()
+                            .type(ChatCompletion.ChatMessageType.ASSISTANT)
                             .content("Tokyo.")
                             .build()
                     ),
@@ -140,6 +140,19 @@ public class CountTokensTest {
     }
 
     @Test
+    void shouldRejectBlankApiKey() {
+        var task = CountTokens.builder()
+            .apiKey(Property.ofValue("   "))
+            .model(Property.ofValue("claude-sonnet-4-6"))
+            .messages(oneMessage())
+            .build();
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), containsString("apiKey"));
+    }
+
+    @Test
     void shouldRejectBlankModel() {
         var task = CountTokens.builder()
             .apiKey(Property.ofValue("test-key"))
@@ -161,14 +174,28 @@ public class CountTokensTest {
 
         var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
 
-        assertThat(failure.getMessage(), containsString("messages"));
+        assertThat(failure.getMessage(), containsString("messages is required"));
     }
 
-    private Property<List<CountTokens.ChatMessage>> oneMessage() {
+    @Test
+    void shouldRejectEmptyMessages() {
+        var task = CountTokens.builder()
+            .apiKey(Property.ofValue("test-key"))
+            .model(Property.ofValue("claude-sonnet-4-6"))
+            .messages(Property.ofValue(List.of()))
+            .build();
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), containsString("messages must contain at least one item"));
+        assertThat(failure.getMessage(), not(containsString("messages is required")));
+    }
+
+    private Property<List<ChatCompletion.ChatMessage>> oneMessage() {
         return Property.ofValue(
             List.of(
-                CountTokens.ChatMessage.builder()
-                    .type(CountTokens.ChatMessageType.USER)
+                ChatCompletion.ChatMessage.builder()
+                    .type(ChatCompletion.ChatMessageType.USER)
                     .content("Hi")
                     .build()
             )
@@ -181,9 +208,9 @@ public class CountTokensTest {
         private String baseUrl;
 
         @Override
-        protected AnthropicClient anthropicClient(String apiKey) {
+        protected AnthropicClient anthropicClient(String rApiKey) {
             return AnthropicOkHttpClient.builder()
-                .apiKey(apiKey)
+                .apiKey(rApiKey)
                 .baseUrl(baseUrl)
                 .maxRetries(0)
                 .build();

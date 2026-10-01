@@ -10,6 +10,7 @@ import com.anthropic.core.JsonValue;
 import com.anthropic.models.messages.ContentBlock;
 import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.StopReason;
+import com.anthropic.models.messages.Tool;
 import com.fasterxml.jackson.core.type.TypeReference;
 
 import io.kestra.core.models.annotations.PluginProperty;
@@ -72,6 +73,10 @@ public abstract class AbstractAnthropic extends Task {
         }
     }
 
+    protected void sendMetrics(RunContext runContext, long inputTokens) {
+        runContext.metric(Counter.of("usage.input.tokens", inputTokens));
+    }
+
     protected static String outputText(Message message) {
         var outputText = new StringBuilder();
         for (ContentBlock block : message.content()) {
@@ -98,6 +103,43 @@ public abstract class AbstractAnthropic extends Task {
 
     protected static String stopReason(Message message) {
         return message.stopReason().map(StopReason::asString).orElse(null);
+    }
+
+    protected static Tool toSdkTool(ChatCompletion.Tool tool) {
+        var inputSchemaBuilder = Tool.InputSchema.builder();
+
+        // Build input schema from the provided map
+        if (tool.inputSchema() != null && tool.inputSchema().containsKey("properties")) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> properties = (Map<String, Object>) tool.inputSchema().get("properties");
+            var propertiesBuilder = Tool.InputSchema.Properties.builder();
+
+            // Convert properties to JsonValue
+            properties.forEach((key, value) ->
+            {
+                JsonValue jsonValue = JsonValue.from(value);
+                propertiesBuilder.putAdditionalProperty(key, jsonValue);
+            });
+
+            inputSchemaBuilder.properties(propertiesBuilder.build());
+
+            // Add required fields if present
+            if (tool.inputSchema().containsKey("required")) {
+                @SuppressWarnings("unchecked")
+                List<String> requiredFields = (List<String>) tool.inputSchema().get("required");
+                inputSchemaBuilder.required(requiredFields);
+            }
+        }
+
+        var toolBuilder = Tool.builder()
+            .name(tool.name())
+            .inputSchema(inputSchemaBuilder.build());
+
+        if (tool.description() != null && !tool.description().isEmpty()) {
+            toolBuilder.description(tool.description());
+        }
+
+        return toolBuilder.build();
     }
 
     private static Map<String, Object> readToolInput(JsonValue input) {
