@@ -46,7 +46,7 @@
 ## What
 
 - Provides plugin components under `io.kestra.plugin.anthropic`.
-- Includes classes such as `ChatCompletion` and `MessageBatch`.
+- Includes classes such as `ChatCompletion`, `MessageBatch`, and `CountTokens`.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)

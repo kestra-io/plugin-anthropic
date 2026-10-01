@@ -260,43 +260,7 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
         // Add tools if provided
         if (!rTools.isEmpty()) {
             List<com.anthropic.models.messages.ToolUnion> toolParams = rTools.stream()
-                .map(tool ->
-                {
-                    var inputSchemaBuilder = com.anthropic.models.messages.Tool.InputSchema.builder();
-
-                    // Build input schema from the provided map
-                    if (tool.inputSchema != null && tool.inputSchema.containsKey("properties")) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> properties = (Map<String, Object>) tool.inputSchema.get("properties");
-                        var propertiesBuilder = com.anthropic.models.messages.Tool.InputSchema.Properties.builder();
-
-                        // Convert properties to JsonValue
-                        properties.forEach((key, value) ->
-                        {
-                            com.anthropic.core.JsonValue jsonValue = com.anthropic.core.JsonValue.from(value);
-                            propertiesBuilder.putAdditionalProperty(key, jsonValue);
-                        });
-
-                        inputSchemaBuilder.properties(propertiesBuilder.build());
-
-                        // Add required fields if present
-                        if (tool.inputSchema.containsKey("required")) {
-                            @SuppressWarnings("unchecked")
-                            List<String> requiredFields = (List<String>) tool.inputSchema.get("required");
-                            inputSchemaBuilder.required(requiredFields);
-                        }
-                    }
-
-                    var toolBuilder = com.anthropic.models.messages.Tool.builder()
-                        .name(tool.name)
-                        .inputSchema(inputSchemaBuilder.build());
-
-                    if (tool.description != null && !tool.description.isEmpty()) {
-                        toolBuilder.description(tool.description);
-                    }
-
-                    return com.anthropic.models.messages.ToolUnion.ofTool(toolBuilder.build());
-                })
+                .map(tool -> com.anthropic.models.messages.ToolUnion.ofTool(toSdkTool(tool)))
                 .toList();
             paramsBuilder.tools(toolParams);
         }
