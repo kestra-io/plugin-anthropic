@@ -126,7 +126,7 @@ import lombok.experimental.SuperBuilder;
     },
     metrics = {
         @Metric(
-            name = "usage.input.tokens",
+            name = "estimate.input.tokens",
             type = Counter.TYPE,
             unit = "token",
             description = "Number of input tokens estimated for the request."

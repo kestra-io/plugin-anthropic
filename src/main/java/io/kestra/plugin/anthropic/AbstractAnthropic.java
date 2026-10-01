@@ -74,7 +74,7 @@ public abstract class AbstractAnthropic extends Task {
     }
 
     protected void sendMetrics(RunContext runContext, long inputTokens) {
-        runContext.metric(Counter.of("usage.input.tokens", inputTokens));
+        runContext.metric(Counter.of("estimate.input.tokens", inputTokens));
     }
 
     protected static String outputText(Message message) {
