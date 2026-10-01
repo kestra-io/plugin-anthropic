@@ -7,6 +7,8 @@ import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
+import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -166,6 +168,27 @@ import lombok.experimental.SuperBuilder;
                             - age
                 """
         ),
+        @Example(
+            title = "Chat completion with Anthropic web search",
+            full = true,
+            code = """
+                id: anthropic_web_search
+                namespace: company.team
+
+                tasks:
+                  - id: search
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: "claude-sonnet-4-6"
+                    maxTokens: 2048
+                    messages:
+                      - type: USER
+                        content: "Summarize recent news about open-source orchestration tools."
+                    tools:
+                      - type: WEB_SEARCH
+                        maxUses: 3
+                """
+        ),
     },
     metrics = {
         @Metric(
@@ -207,10 +230,10 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
 
     @Schema(
         title = "Tools",
-        description = "Optional tools Claude can invoke; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts."
+        description = "Tools Claude can use. Each entry is either a user-defined tool (`name`, optional `description`, `inputSchema` JSON Schema) or an Anthropic built-in tool selected with `type` (currently `WEB_SEARCH`, with optional `maxUses`, `allowedDomains` and `blockedDomains`)."
     )
     @PluginProperty(group = "destination")
-    private Property<List<Tool>> tools;
+    private Property<List<ChatTool>> tools;
 
     @Schema(
         title = "Prompt caching",
@@ -233,7 +256,9 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
         var rTopP = runContext.render(topP).as(Double.class);
         var rTopK = runContext.render(topK).as(Integer.class);
         var rSystem = runContext.render(system).as(String.class);
-        var rTools = runContext.render(tools).asList(Tool.class);
+        var rAllTools = runContext.render(tools).asList(ChatTool.class);
+        var rTools = rAllTools.stream().filter(Tool.class::isInstance).map(Tool.class::cast).toList();
+        var rBuiltInTools = rAllTools.stream().filter(BuiltInTool.class::isInstance).map(BuiltInTool.class::cast).toList();
         var rPromptCaching = runContext.render(promptCaching).as(Boolean.class).orElse(false);
 
         var client = buildClient(rApiKey);
@@ -301,6 +326,8 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
             paramsBuilder.tools(toolParams);
         }
 
+        rBuiltInTools.forEach(tool -> paramsBuilder.addTool(tool.toSdkTool()));
+
         paramsBuilder.messages(messageParams);
 
         // Enable prompt caching if requested
@@ -342,13 +369,64 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
         }
     }
 
+    @JsonTypeInfo(use = JsonTypeInfo.Id.DEDUCTION, defaultImpl = Tool.class)
+    @JsonSubTypes(
+        {
+            @JsonSubTypes.Type(Tool.class),
+            @JsonSubTypes.Type(BuiltInTool.class)
+        }
+    )
+    public interface ChatTool {
+    }
+
     @Builder
     public record Tool(
         @Schema(title = "Tool name", description = "Unique identifier for the tool (1-128 characters).") String name,
 
         @Schema(title = "Tool description", description = "Optional description of what the tool does.") String description,
 
-        @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.") Map<String, Object> inputSchema) {
+        @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.") Map<String, Object> inputSchema) implements ChatTool {
+    }
+
+    public enum BuiltInToolType {
+        WEB_SEARCH
+    }
+
+    @Builder
+    public record BuiltInTool(
+        @Schema(title = "Tool type", description = "The Anthropic-provided tool to enable.") BuiltInToolType type,
+
+        @Schema(title = "Max uses", description = "Maximum searches per request (WEB_SEARCH only).") Long maxUses,
+
+        @Schema(title = "Allowed domains", description = "Only return results from these domains. Cannot be combined with blockedDomains.") List<String> allowedDomains,
+
+        @Schema(title = "Blocked domains", description = "Never return results from these domains. Cannot be combined with allowedDomains.") List<String> blockedDomains) implements ChatTool {
+
+        com.anthropic.models.messages.ToolUnion toSdkTool() {
+            if (type == null) {
+                throw new IllegalArgumentException("`type` is required for a built-in tool");
+            }
+            return switch (type) {
+                case WEB_SEARCH -> {
+                    boolean hasAllowed = allowedDomains != null && !allowedDomains.isEmpty();
+                    boolean hasBlocked = blockedDomains != null && !blockedDomains.isEmpty();
+                    if (hasAllowed && hasBlocked) {
+                        throw new IllegalArgumentException("`allowedDomains` and `blockedDomains` cannot be used together");
+                    }
+                    var builder = com.anthropic.models.messages.WebSearchTool20250305.builder();
+                    if (maxUses != null) {
+                        builder.maxUses(maxUses);
+                    }
+                    if (hasAllowed) {
+                        builder.allowedDomains(allowedDomains);
+                    }
+                    if (hasBlocked) {
+                        builder.blockedDomains(blockedDomains);
+                    }
+                    yield com.anthropic.models.messages.ToolUnion.ofWebSearchTool20250305(builder.build());
+                }
+            };
+        }
     }
 
     @Builder
