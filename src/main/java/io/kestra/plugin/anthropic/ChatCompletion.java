@@ -230,7 +230,7 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
 
     @Schema(
         title = "Tools",
-        description = "Tools Claude can use. Each entry is either a user-defined tool (`name`, optional `description`, `inputSchema` JSON Schema) or an Anthropic built-in tool selected with `type` (currently `WEB_SEARCH`, with optional `maxUses`, `allowedDomains` and `blockedDomains`)."
+        description = "Tools Claude can use. Each entry is either a user-defined tool (`name`, optional `description`, `inputSchema` JSON Schema) or an Anthropic built-in tool selected with `type` (currently `WEB_SEARCH`, with optional `maxUses`, `allowedDomains` and `blockedDomains`). With built-in tools, Anthropic can end a long-running turn with `stopReason` `pause_turn`; the task does not resume it, so `outputText` may then be partial."
     )
     @PluginProperty(group = "destination")
     private Property<List<ChatTool>> tools;

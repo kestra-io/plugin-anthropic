@@ -168,4 +168,40 @@ public class ChatCompletionTest {
         );
         assertThrows(IllegalArgumentException.class, tool::toSdkTool);
     }
+
+    @EnabledIfEnvironmentVariable(named = "ANTHROPIC_API_KEY", matches = ".*")
+    @Test
+    void shouldUseWebSearchBuiltInTool() throws Exception {
+        var runContext = runContextFactory.of(Map.of());
+        var task = ChatCompletion.builder()
+            .apiKey(Property.ofValue(ANTHROPIC_API_KEY))
+            .model(Property.ofValue("claude-sonnet-4-6"))
+            .maxTokens(Property.ofValue(2048L))
+            .messages(
+                Property.ofValue(
+                    List.of(
+                        ChatCompletion.ChatMessage.builder()
+                            .type(ChatCompletion.ChatMessageType.USER)
+                            .content("Search the web: what is Kestra? Answer in one sentence.")
+                            .build()
+                    )
+                )
+            )
+            .tools(
+                Property.ofValue(
+                    List.of(
+                        ChatCompletion.BuiltInTool.builder()
+                            .type(ChatCompletion.BuiltInToolType.WEB_SEARCH)
+                            .maxUses(1L)
+                            .build()
+                    )
+                )
+            )
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRawResponse(), containsString("web_search_tool_result"));
+        assertThat(output.getOutputText(), not(emptyOrNullString()));
+    }
 }
