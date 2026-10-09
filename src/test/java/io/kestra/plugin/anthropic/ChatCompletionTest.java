@@ -154,6 +154,26 @@ public class ChatCompletionTest {
     }
 
     @Test
+    void shouldAcceptInputSchemaAliasWhenRenderingTools() throws Exception {
+        Map<String, Object> schema = Map.of(
+            "type", "object",
+            "properties", Map.of("name", Map.of("type", "string")),
+            "required", List.of("name")
+        );
+        var raw = List.of(
+            Map.of("name", "extract_person_info", "input_schema", schema)
+        );
+
+        Property<List<ChatCompletion.ChatTool>> property = Property.ofExpression("{{ tools }}");
+        List<ChatCompletion.ChatTool> tools = runContextFactory.of(Map.of("tools", raw))
+            .render(property)
+            .asList(ChatCompletion.ChatTool.class);
+
+        assertThat(tools.get(0), instanceOf(ChatCompletion.Tool.class));
+        assertThat(((ChatCompletion.Tool) tools.get(0)).inputSchema(), is(schema));
+    }
+
+    @Test
     void shouldKeepEveryTopLevelSchemaKeywordWhenConvertingCustomTool() throws Exception {
         Map<String, Object> schema = new HashMap<>();
         schema.put("type", "object");
