@@ -148,7 +148,7 @@ import lombok.experimental.SuperBuilder;
                     tools:
                       - name: extract_person_info
                         description: "Extract structured information about a person"
-                        input_schema:
+                        inputSchema:
                           type: object
                           properties:
                             name:

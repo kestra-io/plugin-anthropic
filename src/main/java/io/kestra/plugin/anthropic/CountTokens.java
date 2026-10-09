@@ -74,7 +74,7 @@ import lombok.experimental.SuperBuilder;
                     tools:
                       - name: extract_person_info
                         description: "Extract structured information about a person"
-                        input_schema:
+                        inputSchema:
                           type: object
                           properties:
                             name:
@@ -154,7 +154,7 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
 
     @Schema(
         title = "Tools",
-        description = "Optional tools included in the estimate; each entry needs a unique name, an optional description, and an `input_schema` JSON Schema that defines the parameters the tool accepts. Tools are counted, not invoked."
+        description = "Optional tools included in the estimate; each entry needs a unique name, an optional description, and an `inputSchema` JSON Schema that defines the parameters the tool accepts. Tools are counted, not invoked."
     )
     @PluginProperty(group = "destination")
     private Property<List<ChatCompletion.Tool>> tools;
