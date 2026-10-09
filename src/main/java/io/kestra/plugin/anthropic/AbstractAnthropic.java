@@ -3,6 +3,7 @@ package io.kestra.plugin.anthropic;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.client.okhttp.AnthropicOkHttpClient;
@@ -34,6 +35,9 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractAnthropic extends Task {
+
+    // Tool.InputSchema.Builder already sets type, properties and required, so forwarding them again would serialize them twice.
+    private static final Set<String> TYPED_SCHEMA_KEYS = Set.of("type", "properties", "required");
 
     @Schema(title = "Anthropic API Key")
     @NotNull
@@ -122,13 +126,22 @@ public abstract class AbstractAnthropic extends Task {
             });
 
             inputSchemaBuilder.properties(propertiesBuilder.build());
+        }
 
+        if (tool.inputSchema() != null) {
             // Add required fields if present
             if (tool.inputSchema().containsKey("required")) {
                 @SuppressWarnings("unchecked")
                 List<String> requiredFields = (List<String>) tool.inputSchema().get("required");
                 inputSchemaBuilder.required(requiredFields);
             }
+
+            tool.inputSchema().forEach((key, value) ->
+            {
+                if (!TYPED_SCHEMA_KEYS.contains(key)) {
+                    inputSchemaBuilder.putAdditionalProperty(key, JsonValue.from(value));
+                }
+            });
         }
 
         var toolBuilder = Tool.builder()
