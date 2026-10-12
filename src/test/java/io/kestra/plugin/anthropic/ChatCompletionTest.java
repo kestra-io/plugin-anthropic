@@ -7,7 +7,10 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import com.anthropic.core.ObjectMappers;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
@@ -18,6 +21,7 @@ import jakarta.inject.Inject;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -147,6 +151,69 @@ public class ChatCompletionTest {
 
         assertThat(tools.get(0), instanceOf(ChatCompletion.Tool.class));
         assertThat(tools.get(1), instanceOf(ChatCompletion.BuiltInTool.class));
+    }
+
+    @Test
+    void shouldAcceptInputSchemaAliasWhenRenderingTools() throws Exception {
+        Map<String, Object> schema = Map.of(
+            "type", "object",
+            "properties", Map.of("name", Map.of("type", "string")),
+            "required", List.of("name")
+        );
+        var raw = List.of(
+            Map.of("name", "extract_person_info", "input_schema", schema)
+        );
+
+        Property<List<ChatCompletion.ChatTool>> property = Property.ofExpression("{{ tools }}");
+        List<ChatCompletion.ChatTool> tools = runContextFactory.of(Map.of("tools", raw))
+            .render(property)
+            .asList(ChatCompletion.ChatTool.class);
+
+        assertThat(tools.get(0), instanceOf(ChatCompletion.Tool.class));
+        assertThat(((ChatCompletion.Tool) tools.get(0)).inputSchema(), is(schema));
+    }
+
+    @Test
+    void shouldKeepEveryTopLevelSchemaKeywordWhenConvertingCustomTool() throws Exception {
+        Map<String, Object> schema = new HashMap<>();
+        schema.put("type", "object");
+        schema.put("additionalProperties", false);
+        schema.put(
+            "properties", Map.of(
+                "orderId", Map.of("type", "integer"),
+                "customer", Map.of("$ref", "#/$defs/Customer")
+            )
+        );
+        schema.put("required", List.of("orderId", "customer"));
+        schema.put(
+            "$defs", Map.of(
+                "Customer", Map.of(
+                    "type", "object",
+                    "additionalProperties", false,
+                    "properties", Map.of(
+                        "name", Map.of("type", "string"),
+                        "email", Map.of("type", "string")
+                    ),
+                    "required", List.of("name", "email")
+                )
+            )
+        );
+
+        var tool = ChatCompletion.Tool.builder()
+            .name("record_order")
+            .description("Record an order and its customer")
+            .inputSchema(schema)
+            .build();
+
+        var json = ObjectMappers.jsonMapper().writeValueAsString(AbstractAnthropic.toSdkTool(tool).inputSchema());
+        var strictMapper = JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+        Map<String, Object> serialized = assertDoesNotThrow(
+            () -> strictMapper.readValue(json, new TypeReference<Map<String, Object>>() {
+            })
+        );
+
+        assertThat(serialized.keySet(), containsInAnyOrder("type", "additionalProperties", "properties", "required", "$defs"));
+        assertThat(serialized, is(schema));
     }
 
     @Test

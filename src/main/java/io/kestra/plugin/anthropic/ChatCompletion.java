@@ -7,6 +7,7 @@ import com.anthropic.models.messages.CacheControlEphemeral;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -148,7 +149,7 @@ import lombok.experimental.SuperBuilder;
                     tools:
                       - name: extract_person_info
                         description: "Extract structured information about a person"
-                        input_schema:
+                        inputSchema:
                           type: object
                           properties:
                             name:
@@ -349,6 +350,7 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
 
         @Schema(title = "Tool description", description = "Optional description of what the tool does.") String description,
 
+        @JsonAlias("input_schema")
         @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.") Map<String, Object> inputSchema) implements ChatTool {
     }
 
