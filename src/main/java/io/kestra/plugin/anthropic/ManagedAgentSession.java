@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -45,7 +46,9 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Run a Claude Code session on Claude Managed Agents",
-    description = "Creates an agent, starts a session in an Anthropic-managed cloud environment, sends the prompt, and follows the session events in the execution logs until the agent stops. Nothing has to be installed or hosted on the Kestra side. The task authenticates with an Anthropic API key only. Killing the execution interrupts the session. See the [Managed Agents documentation](https://platform.claude.com/docs/en/managed-agents/overview)."
+    description = """
+            Creates an agent, starts a session in an Anthropic-managed cloud environment, sends the prompt, and follows the session events in the execution logs until the agent stops. Nothing has to be installed or hosted on the Kestra side. The task authenticates with an Anthropic API key only. Killing the execution interrupts the session. See the [Managed Agents documentation](https://platform.claude.com/docs/en/managed-agents/overview).
+        """
 )
 @Plugin(
     examples = {
@@ -111,14 +114,18 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
 
     @Schema(
         title = "Spending limit in USD",
-        description = "Must be greater than 0. The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`. No limit applies when unset."
+        description = """
+                Must be greater than 0. The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`. No limit applies when unset.
+            """
     )
     @PluginProperty(group = "advanced")
     private Property<BigDecimal> maxCostUsd;
 
     @Schema(
         title = "Environment networking",
-        description = "Network access of the environment created for the run, ignored when `environmentId` is set. `UNRESTRICTED` lets the sandbox reach any host. Because the sandbox holds the repository token and MCP credentials, prefer `LIMITED` with `allowedHosts` whenever the prompt or the repository content is not fully trusted."
+        description = """
+                Network access of the environment created for the run, ignored when `environmentId` is set. `UNRESTRICTED` lets the sandbox reach any host. Because the sandbox holds the repository token and MCP credentials, prefer `LIMITED` with `allowedHosts` whenever the prompt or the repository content is not fully trusted.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
@@ -126,14 +133,18 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
 
     @Schema(
         title = "Allowed hosts",
-        description = "Hosts the sandbox may reach when `networking` is `LIMITED`. MCP servers and package managers are allowed in that mode."
+        description = """
+                Hosts the sandbox may reach when `networking` is `LIMITED`. MCP servers and package managers are allowed in that mode.
+            """
     )
     @PluginProperty(group = "advanced")
     private Property<List<String>> allowedHosts;
 
     @Schema(
         title = "Environment ID",
-        description = "Existing environment to run in. When empty, a cloud environment with unrestricted networking is created for the run and archived afterwards."
+        description = """
+                Existing environment to run in. When empty, a cloud environment is created for the run with the network access set by `networking`, then archived afterwards.
+            """
     )
     @PluginProperty(group = "advanced")
     private Property<String> environmentId;
@@ -234,10 +245,10 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         }
 
         // Typed builders require every discriminator, so lists are sent as JSON bodies, matching the API reference.
-        List<Map<String, Object>> tools = new ArrayList<>();
+        var tools = new ArrayList<Map<String, Object>>();
         tools.add(Map.of("type", "agent_toolset_20260401"));
         if (!rMcpServers.isEmpty()) {
-            List<Map<String, Object>> servers = new ArrayList<>();
+            var servers = new ArrayList<Map<String, Object>>();
             for (var server : rMcpServers) {
                 var name = runContext.render(server.getName()).as(String.class)
                     .filter(value -> !value.isBlank())
@@ -253,13 +264,13 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         builder.putAdditionalBodyProperty("tools", JsonValue.from(tools));
 
         if (!rSkills.isEmpty()) {
-            List<Map<String, Object>> skillList = new ArrayList<>();
+            var skillList = new ArrayList<Map<String, Object>>();
             for (var skill : rSkills) {
                 var skillId = runContext.render(skill.getSkillId()).as(String.class)
                     .filter(value -> !value.isBlank())
                     .orElseThrow(() -> new IllegalArgumentException("skills[].skillId is required"));
                 var type = runContext.render(skill.getType()).as(Skill.Type.class).orElse(Skill.Type.ANTHROPIC);
-                skillList.add(Map.of("type", type.name().toLowerCase(), "skill_id", skillId));
+                skillList.add(Map.of("type", type.name().toLowerCase(Locale.ROOT), "skill_id", skillId));
             }
             builder.putAdditionalBodyProperty("skills", JsonValue.from(skillList));
         }
@@ -273,7 +284,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         Networking rNetworking,
         List<String> rAllowedHosts,
         boolean hasMcpServers) {
-        Map<String, Object> network = new LinkedHashMap<>();
+        var network = new LinkedHashMap<String, Object>();
         if (rNetworking == Networking.LIMITED) {
             network.put("type", "limited");
             network.put("allowed_hosts", rAllowedHosts);
@@ -307,7 +318,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             var token = runContext.render(repository.getToken()).as(String.class).orElse(null);
             var branch = runContext.render(repository.getBranch()).as(String.class).orElse(null);
 
-            Map<String, Object> resource = new LinkedHashMap<>();
+            var resource = new LinkedHashMap<String, Object>();
             resource.put("type", "github_repository");
             resource.put("url", url);
             if (token != null) {

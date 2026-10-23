@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +19,7 @@ import com.sun.net.httpserver.HttpServer;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.utils.IdUtils;
 
 import jakarta.inject.Inject;
 import lombok.NoArgsConstructor;
@@ -28,6 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 class ManagedAgentSessionTest {
+
+    private static final Pattern EVENT_TYPE = Pattern.compile("\"type\":\"([a-z_.]+)\"");
 
     private static final String AGENT_MESSAGE = "{\"type\":\"agent.message\",\"id\":\"evt_1\",\"processed_at\":\"2026-10-22T10:00:00Z\",\"content\":[{\"type\":\"text\",\"text\":\"All TODOs summarized.\"}]}";
 
@@ -158,7 +163,7 @@ class ManagedAgentSessionTest {
     @Test
     void shouldRequireApiKey() {
         var task = ManagedAgentSession.builder()
-            .id("session")
+            .id("session_" + IdUtils.create())
             .type(ManagedAgentSession.class.getName())
             .apiKey(Property.ofValue(" "))
             .model(Property.ofValue("claude-sonnet-5"))
@@ -172,7 +177,7 @@ class ManagedAgentSessionTest {
     @Test
     void shouldRequirePrompt() {
         var task = ManagedAgentSession.builder()
-            .id("session")
+            .id("session_" + IdUtils.create())
             .type(ManagedAgentSession.class.getName())
             .apiKey(Property.ofValue("test-key"))
             .model(Property.ofValue("claude-sonnet-5"))
@@ -186,7 +191,7 @@ class ManagedAgentSessionTest {
     @Test
     void shouldRejectNonPositiveSpendingLimit() {
         var task = ManagedAgentSession.builder()
-            .id("session")
+            .id("session_" + IdUtils.create())
             .type(ManagedAgentSession.class.getName())
             .apiKey(Property.ofValue("test-key"))
             .model(Property.ofValue("claude-sonnet-5"))
@@ -224,7 +229,7 @@ class ManagedAgentSessionTest {
 
     private static LocalManagedAgentSession.LocalManagedAgentSessionBuilder<?, ?> task(String baseUrl) {
         return LocalManagedAgentSession.builder()
-            .id("session")
+            .id("session_" + IdUtils.create())
             .type(ManagedAgentSession.class.getName())
             .baseUrl(baseUrl)
             .apiKey(Property.ofValue("test-key"))
@@ -240,7 +245,7 @@ class ManagedAgentSessionTest {
         var body = new StringBuilder();
         for (var event : events) {
             // the SDK only accepts messages that name their type in an `event:` line, as the real API does
-            var matcher = java.util.regex.Pattern.compile("\"type\":\"([a-z_.]+)\"").matcher(event);
+            var matcher = EVENT_TYPE.matcher(event);
             matcher.find();
             body.append("event: ").append(matcher.group(1)).append("\n");
             body.append("data: ").append(event).append("\n\n");
@@ -267,7 +272,7 @@ class ManagedAgentSessionTest {
     private static final class MockApi {
         private final HttpServer server;
         private final List<String> requests = Collections.synchronizedList(new ArrayList<>());
-        private final Map<String, String> bodies = new java.util.concurrent.ConcurrentHashMap<>();
+        private final Map<String, String> bodies = new ConcurrentHashMap<>();
 
         private MockApi(HttpServer server) {
             this.server = server;
@@ -283,8 +288,8 @@ class ManagedAgentSessionTest {
                 mock.requests.add(key);
                 mock.bodies.merge(key, body, (previous, next) -> previous + "\n" + next);
 
-                String contentType = "application/json";
-                String response = switch (key) {
+                var contentType = "application/json";
+                var response = switch (key) {
                     case "POST /v1/agents" -> "{\"id\":\"agent_1\",\"type\":\"agent\"}";
                     case "POST /v1/environments" -> "{\"id\":\"env_1\",\"type\":\"environment\"}";
                     case "POST /v1/sessions" -> "{\"id\":\"sesn_1\",\"type\":\"session\"}";
@@ -300,7 +305,7 @@ class ManagedAgentSessionTest {
                     default -> null;
                 };
 
-                byte[] bytes = (response == null ? "{\"error\":{\"message\":\"unexpected " + key + "\"}}" : response).getBytes(StandardCharsets.UTF_8);
+                var bytes = (response == null ? "{\"error\":{\"message\":\"unexpected " + key + "\"}}" : response).getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", contentType);
                 exchange.sendResponseHeaders(response == null ? 404 : 200, bytes.length);
                 exchange.getResponseBody().write(bytes);
