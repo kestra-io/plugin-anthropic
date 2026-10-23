@@ -1,12 +1,12 @@
 package io.kestra.plugin.anthropic;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.anthropic.client.AnthropicClient;
 import com.anthropic.core.JsonValue;
@@ -14,6 +14,8 @@ import com.anthropic.models.beta.agents.AgentCreateParams;
 import com.anthropic.models.beta.agents.BetaManagedAgentsModel;
 import com.anthropic.models.beta.environments.EnvironmentCreateParams;
 import com.anthropic.models.beta.sessions.SessionCreateParams;
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserInterruptEventParams;
+import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams;
 import com.anthropic.models.beta.sessions.events.EventSendParams;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
@@ -109,10 +111,25 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
 
     @Schema(
         title = "Spending limit in USD",
-        description = "The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`."
+        description = "Must be greater than 0. The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`. No limit applies when unset."
     )
     @PluginProperty(group = "advanced")
     private Property<BigDecimal> maxCostUsd;
+
+    @Schema(
+        title = "Environment networking",
+        description = "Network access of the environment created for the run, ignored when `environmentId` is set. `UNRESTRICTED` lets the sandbox reach any host. Because the sandbox holds the repository token and MCP credentials, prefer `LIMITED` with `allowedHosts` whenever the prompt or the repository content is not fully trusted."
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Networking> networking = Property.ofValue(Networking.UNRESTRICTED);
+
+    @Schema(
+        title = "Allowed hosts",
+        description = "Hosts the sandbox may reach when `networking` is `LIMITED`. MCP servers and package managers are allowed in that mode."
+    )
+    @PluginProperty(group = "advanced")
+    private Property<List<String>> allowedHosts;
 
     @Schema(
         title = "Environment ID",
@@ -121,16 +138,20 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @PluginProperty(group = "advanced")
     private Property<String> environmentId;
 
-    @Schema(title = "Timeout", description = "Maximum time to follow the session. The session is interrupted when it is reached.")
-    @Builder.Default
-    @PluginProperty(group = "execution")
-    private Property<Duration> timeout = Property.ofValue(Duration.ofHours(1));
-
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private transient volatile AnthropicClient activeClient;
 
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private transient volatile String activeSessionId;
+
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final transient AtomicBoolean interrupted = new AtomicBoolean(false);
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -151,7 +172,11 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         var rSkills = runContext.render(skills).asList(Skill.class);
         var rMaxCost = runContext.render(maxCostUsd).as(BigDecimal.class).orElse(null);
         var rEnvironmentId = runContext.render(environmentId).as(String.class).filter(value -> !value.isBlank()).orElse(null);
-        var rTimeout = runContext.render(timeout).as(Duration.class).orElse(Duration.ofHours(1));
+        if (rMaxCost != null && rMaxCost.signum() <= 0) {
+            throw new IllegalArgumentException("maxCostUsd must be greater than 0");
+        }
+        var rNetworking = runContext.render(networking).as(Networking.class).orElse(Networking.UNRESTRICTED);
+        var rAllowedHosts = runContext.render(allowedHosts).asList(String.class);
 
         var client = anthropicClient(rApiKey);
         this.activeClient = client;
@@ -163,7 +188,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
 
             var rEnvId = rEnvironmentId;
             if (rEnvId == null) {
-                rEnvId = createEnvironment(client, runContext);
+                rEnvId = createEnvironment(client, runContext, rNetworking, rAllowedHosts, !rMcpServers.isEmpty());
                 createdEnvironmentId = rEnvId;
                 logger.info("Created Managed Agents environment {}", rEnvId);
             }
@@ -172,7 +197,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             this.activeSessionId = sessionId;
             logger.info("Started Managed Agents session {}", sessionId);
 
-            return followSession(client, runContext, sessionId, rPrompt, rTimeout);
+            return followSession(client, runContext, sessionId, rPrompt);
         } finally {
             cleanup(client, agentId, createdEnvironmentId, runContext);
             this.activeClient = null;
@@ -185,12 +210,8 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     public void kill() {
         var client = this.activeClient;
         var sessionId = this.activeSessionId;
-        if (client != null && sessionId != null) {
-            try {
-                interrupt(client, sessionId);
-            } catch (Exception ignored) {
-                // best effort: the execution is being killed anyway
-            }
+        if (client != null && sessionId != null && interrupted.compareAndSet(false, true)) {
+            interruptQuietly(client, sessionId);
         }
     }
 
@@ -218,8 +239,12 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         if (!rMcpServers.isEmpty()) {
             List<Map<String, Object>> servers = new ArrayList<>();
             for (var server : rMcpServers) {
-                var name = runContext.render(server.getName()).as(String.class).orElseThrow();
-                var url = runContext.render(server.getUrl()).as(String.class).orElseThrow();
+                var name = runContext.render(server.getName()).as(String.class)
+                    .filter(value -> !value.isBlank())
+                    .orElseThrow(() -> new IllegalArgumentException("mcpServers[].name is required"));
+                var url = runContext.render(server.getUrl()).as(String.class)
+                    .filter(value -> !value.isBlank())
+                    .orElseThrow(() -> new IllegalArgumentException("mcpServers[].url is required"));
                 servers.add(Map.of("type", "url", "name", name, "url", url));
                 tools.add(Map.of("type", "mcp_toolset", "mcp_server_name", name));
             }
@@ -230,8 +255,10 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         if (!rSkills.isEmpty()) {
             List<Map<String, Object>> skillList = new ArrayList<>();
             for (var skill : rSkills) {
-                var skillId = runContext.render(skill.getSkillId()).as(String.class).orElseThrow();
-                var type = skill.getType() == null ? Skill.Type.ANTHROPIC : skill.getType();
+                var skillId = runContext.render(skill.getSkillId()).as(String.class)
+                    .filter(value -> !value.isBlank())
+                    .orElseThrow(() -> new IllegalArgumentException("skills[].skillId is required"));
+                var type = runContext.render(skill.getType()).as(Skill.Type.class).orElse(Skill.Type.ANTHROPIC);
                 skillList.add(Map.of("type", type.name().toLowerCase(), "skill_id", skillId));
             }
             builder.putAdditionalBodyProperty("skills", JsonValue.from(skillList));
@@ -240,13 +267,25 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         return client.beta().agents().create(builder.build()).id();
     }
 
-    private String createEnvironment(AnthropicClient client, RunContext runContext) {
+    private String createEnvironment(
+        AnthropicClient client,
+        RunContext runContext,
+        Networking rNetworking,
+        List<String> rAllowedHosts,
+        boolean hasMcpServers) {
+        Map<String, Object> network = new LinkedHashMap<>();
+        if (rNetworking == Networking.LIMITED) {
+            network.put("type", "limited");
+            network.put("allowed_hosts", rAllowedHosts);
+            network.put("allow_mcp_servers", hasMcpServers);
+            network.put("allow_package_managers", true);
+        } else {
+            network.put("type", "unrestricted");
+        }
+
         var params = EnvironmentCreateParams.builder()
             .name("kestra-" + runContext.flowInfo().id() + "-" + Instant.now().toEpochMilli())
-            .putAdditionalBodyProperty(
-                "config",
-                JsonValue.from(Map.of("type", "cloud", "networking", Map.of("type", "unrestricted")))
-            )
+            .putAdditionalBodyProperty("config", JsonValue.from(Map.of("type", "cloud", "networking", network)))
             .build();
         return client.beta().environments().create(params).id();
     }
@@ -290,9 +329,8 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         return client.beta().sessions().create(builder.build()).id();
     }
 
-    private Output followSession(AnthropicClient client, RunContext runContext, String sessionId, String rPrompt, Duration rTimeout) {
+    private Output followSession(AnthropicClient client, RunContext runContext, String sessionId, String rPrompt) {
         var logger = runContext.logger();
-        var deadline = Instant.now().plus(rTimeout);
         var message = new StringBuilder();
         ClaudeCodeSessionStatus status = null;
         String error = null;
@@ -302,9 +340,11 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             client.beta().sessions().events().send(
                 EventSendParams.builder()
                     .sessionId(sessionId)
-                    .putAdditionalBodyProperty(
-                        "events",
-                        JsonValue.from(List.of(Map.of("type", "user.message", "content", List.of(Map.of("type", "text", "text", rPrompt)))))
+                    .addEvent(
+                        BetaManagedAgentsUserMessageEventParams.builder()
+                            .type(BetaManagedAgentsUserMessageEventParams.Type.USER_MESSAGE)
+                            .addTextContent(rPrompt)
+                            .build()
                     )
                     .build()
             );
@@ -312,13 +352,6 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             var iterator = stream.stream().iterator();
             while (status == null && iterator.hasNext()) {
                 var event = iterator.next();
-
-                if (Instant.now().isAfter(deadline)) {
-                    interrupt(client, sessionId);
-                    status = ClaudeCodeSessionStatus.FAILED;
-                    error = "Session timed out after " + rTimeout;
-                    break;
-                }
 
                 if (event.agentMessage().isPresent()) {
                     // each agent message replaces the previous one: the last one is the final message
@@ -348,9 +381,14 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
                     }
                 }
             }
+        } catch (RuntimeException e) {
+            // never leave a session running (and billing) without anyone following it
+            interruptQuietly(client, sessionId);
+            throw e;
         }
 
         if (status == null) {
+            interruptQuietly(client, sessionId);
             status = ClaudeCodeSessionStatus.FAILED;
             error = "The event stream closed before the session stopped";
         }
@@ -381,22 +419,38 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         client.beta().sessions().events().send(
             EventSendParams.builder()
                 .sessionId(sessionId)
-                .putAdditionalBodyProperty("events", JsonValue.from(List.of(Map.of("type", "user.interrupt"))))
+                .addEvent(
+                    BetaManagedAgentsUserInterruptEventParams.builder()
+                        .type(BetaManagedAgentsUserInterruptEventParams.Type.USER_INTERRUPT)
+                        .build()
+                )
                 .build()
         );
     }
 
+    private void interruptQuietly(AnthropicClient client, String sessionId) {
+        try {
+            interrupt(client, sessionId);
+        } catch (Exception ignored) {
+            // best effort: the session is being abandoned anyway
+        }
+    }
+
     private void cleanup(AnthropicClient client, String agentId, String createdEnvironmentId, RunContext runContext) {
         // The session itself is kept so that it can be inspected with the returned session id.
-        try {
-            if (agentId != null) {
+        if (agentId != null) {
+            try {
                 client.beta().agents().archive(agentId);
+            } catch (Exception e) {
+                runContext.logger().warn("Could not archive the temporary agent {}: {}", agentId, e.getMessage());
             }
-            if (createdEnvironmentId != null) {
+        }
+        if (createdEnvironmentId != null) {
+            try {
                 client.beta().environments().archive(createdEnvironmentId);
+            } catch (Exception e) {
+                runContext.logger().warn("Could not archive the temporary environment {}: {}", createdEnvironmentId, e.getMessage());
             }
-        } catch (Exception e) {
-            runContext.logger().warn("Could not archive the temporary agent or environment: {}", e.getMessage());
         }
     }
 
@@ -407,13 +461,15 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     public static class GitRepository {
         @Schema(title = "Repository URL")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<String> url;
 
         @Schema(title = "Branch to check out")
+        @PluginProperty(group = "main")
         private Property<String> branch;
 
         @Schema(title = "Access token", description = "Token used to clone the repository and push changes.")
-        @PluginProperty(secret = true)
+        @PluginProperty(secret = true, group = "main")
         private Property<String> token;
     }
 
@@ -424,10 +480,12 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     public static class McpServer {
         @Schema(title = "Server name", description = "Unique name of the MCP server within the agent.")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<String> name;
 
         @Schema(title = "Server URL")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<String> url;
     }
 
@@ -437,16 +495,23 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @AllArgsConstructor
     public static class Skill {
         @Schema(title = "Skill type", description = "`ANTHROPIC` for prebuilt skills, `CUSTOM` for skills uploaded to your organization.")
-        private Type type;
+        @PluginProperty(group = "main")
+        private Property<Type> type;
 
         @Schema(title = "Skill ID")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<String> skillId;
 
         public enum Type {
             ANTHROPIC,
             CUSTOM
         }
+    }
+
+    public enum Networking {
+        UNRESTRICTED,
+        LIMITED
     }
 
     @Builder

@@ -27,6 +27,7 @@ Infrastructure dependencies (Docker Compose services):
 
 - `io.kestra.plugin.anthropic.ChatCompletion`
 - `io.kestra.plugin.anthropic.CountTokens`
+- `io.kestra.plugin.anthropic.ManagedAgentSession`
 
 ### Project Structure
 
