@@ -8,6 +8,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
@@ -144,6 +150,37 @@ class ManagedAgentSessionTest {
     }
 
     @Test
+    void shouldStopSessionWhenTaskIsInterruptedWhileAgentIsSilent() throws Exception {
+        var mock = MockApi.start("", true);
+        try {
+            var failure = new AtomicReference<Throwable>();
+            var worker = new Thread(() ->
+            {
+                try {
+                    task(mock.baseUrl()).build().run(runContextFactory.of(Map.of()));
+                } catch (Throwable e) {
+                    failure.set(e);
+                }
+            });
+            worker.start();
+            await(() -> mock.requests().contains("POST /v1/sessions/sesn_1/events"));
+
+            // what the worker does when the task timeout expires
+            worker.interrupt();
+            worker.join(TimeUnit.SECONDS.toMillis(10));
+
+            assertThat(worker.isAlive(), is(false));
+            assertThat(failure.get(), notNullValue());
+            var eventPosts = mock.requests().stream().filter("POST /v1/sessions/sesn_1/events"::equals).count();
+            assertThat(eventPosts, is(2L)); // the prompt, then the interrupt
+            assertThat(mock.requests(), hasItem("POST /v1/agents/agent_1/archive"));
+            assertThat(mock.requests(), hasItem("POST /v1/environments/env_1/archive"));
+        } finally {
+            mock.stop();
+        }
+    }
+
+    @Test
     void shouldCreateLimitedEnvironment() throws Exception {
         var mock = MockApi.start(sse(AGENT_MESSAGE, idle("end_turn")));
         try {
@@ -237,6 +274,13 @@ class ManagedAgentSessionTest {
             .prompt(Property.ofValue("Summarize the open TODOs."));
     }
 
+    private static void await(BooleanSupplier condition) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(25);
+        }
+    }
+
     private static String idle(String stopReason) {
         return "{\"type\":\"session.status_idle\",\"id\":\"evt_2\",\"processed_at\":\"2026-10-22T10:00:01Z\",\"stop_reason\":{\"type\":\"" + stopReason + "\"}}";
     }
@@ -273,20 +317,41 @@ class ManagedAgentSessionTest {
         private final HttpServer server;
         private final List<String> requests = Collections.synchronizedList(new ArrayList<>());
         private final Map<String, String> bodies = new ConcurrentHashMap<>();
+        private final CountDownLatch release = new CountDownLatch(1);
+        private final ExecutorService executor = Executors.newCachedThreadPool();
 
         private MockApi(HttpServer server) {
             this.server = server;
         }
 
         static MockApi start(String streamBody) throws Exception {
+            return start(streamBody, false);
+        }
+
+        /** With hangStream, the event stream stays open and silent, like an agent running a long command. */
+        static MockApi start(String streamBody, boolean hangStream) throws Exception {
             var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             var mock = new MockApi(server);
+            server.setExecutor(mock.executor);
             server.createContext("/", exchange ->
             {
                 var key = exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath();
                 var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
                 mock.requests.add(key);
                 mock.bodies.merge(key, body, (previous, next) -> previous + "\n" + next);
+
+                if (hangStream && "GET /v1/sessions/sesn_1/events/stream".equals(key)) {
+                    exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                    exchange.sendResponseHeaders(200, 0);
+                    exchange.getResponseBody().flush();
+                    try {
+                        mock.release.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    exchange.close();
+                    return;
+                }
 
                 var contentType = "application/json";
                 var response = switch (key) {
@@ -328,7 +393,9 @@ class ManagedAgentSessionTest {
         }
 
         void stop() {
+            release.countDown();
             server.stop(0);
+            executor.shutdownNow();
         }
     }
 }

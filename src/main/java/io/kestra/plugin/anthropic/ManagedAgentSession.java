@@ -7,6 +7,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.anthropic.client.AnthropicClient;
@@ -47,7 +50,7 @@ import lombok.experimental.SuperBuilder;
 @Schema(
     title = "Run a Claude Code session on Claude Managed Agents",
     description = """
-            Creates an agent, starts a session in an Anthropic-managed cloud environment, sends the prompt, and follows the session events in the execution logs until the agent stops. Nothing has to be installed or hosted on the Kestra side. The task authenticates with an Anthropic API key only. Killing the execution interrupts the session. See the [Managed Agents documentation](https://platform.claude.com/docs/en/managed-agents/overview).
+        Creates an agent, starts a session in an Anthropic-managed cloud environment, sends the prompt, and follows the session events in the execution logs until the agent stops. Nothing has to be installed or hosted on the Kestra side. The task authenticates with an Anthropic API key only. Killing the execution interrupts the session. See the [Managed Agents documentation](https://platform.claude.com/docs/en/managed-agents/overview).
         """
 )
 @Plugin(
@@ -115,7 +118,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @Schema(
         title = "Spending limit in USD",
         description = """
-                Must be greater than 0. The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`. No limit applies when unset.
+            Must be greater than 0. The session pauses once its list cost reaches this amount, and the task then ends with status `SPENDING_LIMIT_REACHED`. No limit applies when unset.
             """
     )
     @PluginProperty(group = "advanced")
@@ -124,7 +127,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @Schema(
         title = "Environment networking",
         description = """
-                Network access of the environment created for the run, ignored when `environmentId` is set. `UNRESTRICTED` lets the sandbox reach any host. Because the sandbox holds the repository token and MCP credentials, prefer `LIMITED` with `allowedHosts` whenever the prompt or the repository content is not fully trusted.
+            Network access of the environment created for the run, ignored when `environmentId` is set. `UNRESTRICTED` lets the sandbox reach any host. Because the sandbox holds the repository token and MCP credentials, prefer `LIMITED` with `allowedHosts` whenever the prompt or the repository content is not fully trusted.
             """
     )
     @Builder.Default
@@ -134,7 +137,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @Schema(
         title = "Allowed hosts",
         description = """
-                Hosts the sandbox may reach when `networking` is `LIMITED`. MCP servers and package managers are allowed in that mode.
+            Hosts the sandbox may reach when `networking` is `LIMITED`. MCP servers and package managers are allowed in that mode.
             """
     )
     @PluginProperty(group = "advanced")
@@ -143,7 +146,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     @Schema(
         title = "Environment ID",
         description = """
-                Existing environment to run in. When empty, a cloud environment is created for the run with the network access set by `networking`, then archived afterwards.
+            Existing environment to run in. When empty, a cloud environment is created for the run with the network access set by `networking`, then archived afterwards.
             """
     )
     @PluginProperty(group = "advanced")
@@ -186,13 +189,27 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         if (rMaxCost != null && rMaxCost.signum() <= 0) {
             throw new IllegalArgumentException("maxCostUsd must be greater than 0");
         }
-        var rNetworking = runContext.render(networking).as(Networking.class).orElse(Networking.UNRESTRICTED);
+        Networking rNetworking;
+        try {
+            rNetworking = runContext.render(networking).as(Networking.class).orElse(Networking.UNRESTRICTED);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("networking must be one of UNRESTRICTED, LIMITED: " + e.getMessage(), e);
+        }
         var rAllowedHosts = runContext.render(allowedHosts).asList(String.class);
+
+        if (rEnvironmentId != null && (rNetworking == Networking.LIMITED || !rAllowedHosts.isEmpty())) {
+            logger.warn("networking and allowedHosts are ignored because environmentId is set");
+        } else if (rNetworking == Networking.UNRESTRICTED && !rAllowedHosts.isEmpty()) {
+            logger.warn("allowedHosts only applies when networking is LIMITED, so it is ignored");
+        } else if (rEnvironmentId == null && rNetworking == Networking.LIMITED && rAllowedHosts.isEmpty()) {
+            logger.warn("networking is LIMITED without allowedHosts: only MCP servers and package managers are reachable");
+        }
 
         var client = anthropicClient(rApiKey);
         this.activeClient = client;
         String agentId = null;
         String createdEnvironmentId = null;
+        var wasInterrupted = false;
         try {
             agentId = createAgent(client, runContext, rModel, rSystemPrompt, rMcpServers, rSkills);
             logger.info("Created Managed Agents agent {}", agentId);
@@ -209,11 +226,18 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             logger.info("Started Managed Agents session {}", sessionId);
 
             return followSession(client, runContext, sessionId, rPrompt);
+        } catch (InterruptedException e) {
+            wasInterrupted = true;
+            throw e;
         } finally {
             cleanup(client, agentId, createdEnvironmentId, runContext);
             this.activeClient = null;
             this.activeSessionId = null;
             client.close();
+            if (wasInterrupted) {
+                // restored last: an interrupted thread cannot make the cleanup HTTP calls above
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -340,63 +364,108 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         return client.beta().sessions().create(builder.build()).id();
     }
 
-    private Output followSession(AnthropicClient client, RunContext runContext, String sessionId, String rPrompt) {
+    private Output followSession(AnthropicClient client, RunContext runContext, String sessionId, String rPrompt)
+        throws InterruptedException {
         var logger = runContext.logger();
         var message = new StringBuilder();
-        ClaudeCodeSessionStatus status = null;
-        String error = null;
+        StreamOutcome outcome;
 
-        // Open the stream before sending the prompt so no event is missed.
-        try (var stream = client.beta().sessions().events().streamStreaming(sessionId)) {
-            client.beta().sessions().events().send(
-                EventSendParams.builder()
-                    .sessionId(sessionId)
-                    .addEvent(
-                        BetaManagedAgentsUserMessageEventParams.builder()
-                            .type(BetaManagedAgentsUserMessageEventParams.Type.USER_MESSAGE)
-                            .addTextContent(rPrompt)
-                            .build()
-                    )
-                    .build()
-            );
+        // Daemon thread: it may stay blocked on a silent stream after the task was stopped.
+        var executor = Executors.newSingleThreadExecutor(runnable ->
+        {
+            var thread = new Thread(runnable, "claude-session-events");
+            thread.setDaemon(true);
+            return thread;
+        });
+        try {
+            // Open the stream before sending the prompt so no event is missed.
+            var stream = client.beta().sessions().events().streamStreaming(sessionId);
+            Future<StreamOutcome> reader;
+            try {
+                client.beta().sessions().events().send(
+                    EventSendParams.builder()
+                        .sessionId(sessionId)
+                        .addEvent(
+                            BetaManagedAgentsUserMessageEventParams.builder()
+                                .type(BetaManagedAgentsUserMessageEventParams.Type.USER_MESSAGE)
+                                .addTextContent(rPrompt)
+                                .build()
+                        )
+                        .build()
+                );
 
-            var iterator = stream.stream().iterator();
-            while (status == null && iterator.hasNext()) {
-                var event = iterator.next();
+                // Events are read on their own thread, which also closes the stream: a blocked socket read ignores
+                // Thread.interrupt() and closing a stream from another thread waits for that read, so this thread
+                // only waits on a future, which lets the task timeout and kill end the run while the agent is silent.
+                reader = executor.submit(() ->
+                {
+                    try (stream) {
+                        ClaudeCodeSessionStatus streamStatus = null;
+                        String streamError = null;
+                        var iterator = stream.stream().iterator();
+                        while (streamStatus == null && iterator.hasNext()) {
+                            var event = iterator.next();
 
-                if (event.agentMessage().isPresent()) {
-                    // each agent message replaces the previous one: the last one is the final message
-                    message.setLength(0);
-                    for (var block : event.agentMessage().get().content()) {
-                        block.text().ifPresent(text -> message.append(text.text()));
+                            if (event.agentMessage().isPresent()) {
+                                // each agent message replaces the previous one: the last one is the final message
+                                message.setLength(0);
+                                for (var block : event.agentMessage().get().content()) {
+                                    block.text().ifPresent(text -> message.append(text.text()));
+                                }
+                                logger.info("[agent] {}", message);
+                            } else if (event.agentToolUse().isPresent()) {
+                                logger.info("[tool] {}", event.agentToolUse().get().name());
+                            } else if (event.sessionError().isPresent()) {
+                                logger.warn("[session error] {}", event.sessionError().get().error());
+                            } else if (event.sessionStatusTerminated().isPresent()) {
+                                streamStatus = ClaudeCodeSessionStatus.FAILED;
+                                streamError = "Session terminated";
+                            } else if (event.sessionStatusIdle().isPresent()) {
+                                var stopReason = event.sessionStatusIdle().get().stopReason();
+                                if (stopReason.isEndTurn()) {
+                                    streamStatus = ClaudeCodeSessionStatus.FINISHED;
+                                } else if (stopReason.isBudgetReached()) {
+                                    streamStatus = ClaudeCodeSessionStatus.SPENDING_LIMIT_REACHED;
+                                } else if (stopReason.isRequiresAction()) {
+                                    streamStatus = ClaudeCodeSessionStatus.WAITING_FOR_INPUT;
+                                } else {
+                                    streamStatus = ClaudeCodeSessionStatus.FAILED;
+                                    streamError = "Session stopped after exhausting its retries";
+                                }
+                            }
+                        }
+                        return new StreamOutcome(streamStatus, streamError);
                     }
-                    logger.info("[agent] {}", message);
-                } else if (event.agentToolUse().isPresent()) {
-                    logger.info("[tool] {}", event.agentToolUse().get().name());
-                } else if (event.sessionError().isPresent()) {
-                    logger.warn("[session error] {}", event.sessionError().get().error());
-                } else if (event.sessionStatusTerminated().isPresent()) {
-                    status = ClaudeCodeSessionStatus.FAILED;
-                    error = "Session terminated";
-                } else if (event.sessionStatusIdle().isPresent()) {
-                    var stopReason = event.sessionStatusIdle().get().stopReason();
-                    if (stopReason.isEndTurn()) {
-                        status = ClaudeCodeSessionStatus.FINISHED;
-                    } else if (stopReason.isBudgetReached()) {
-                        status = ClaudeCodeSessionStatus.SPENDING_LIMIT_REACHED;
-                    } else if (stopReason.isRequiresAction()) {
-                        status = ClaudeCodeSessionStatus.WAITING_FOR_INPUT;
-                    } else {
-                        status = ClaudeCodeSessionStatus.FAILED;
-                        error = "Session stopped after exhausting its retries";
-                    }
+                });
+            } catch (RuntimeException e) {
+                // the reader never started, so nothing is blocked on the stream
+                stream.close();
+                throw e;
+            }
+
+            try {
+                outcome = reader.get();
+            } catch (InterruptedException e) {
+                // timeout or kill: stop the session, the reader ends once the stream does
+                interruptQuietly(client, sessionId);
+                reader.cancel(true);
+                throw e;
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
                 }
+                throw new IllegalStateException(e.getCause());
             }
         } catch (RuntimeException e) {
             // never leave a session running (and billing) without anyone following it
             interruptQuietly(client, sessionId);
             throw e;
+        } finally {
+            executor.shutdownNow();
         }
+
+        var status = outcome.status();
+        var error = outcome.error();
 
         if (status == null) {
             interruptQuietly(client, sessionId);
@@ -440,15 +509,22 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
     }
 
     private void interruptQuietly(AnthropicClient client, String sessionId) {
+        // an interrupted thread fails every HTTP call, so the flag is cleared for the call and restored after
+        var wasInterrupted = Thread.interrupted();
         try {
             interrupt(client, sessionId);
         } catch (Exception ignored) {
             // best effort: the session is being abandoned anyway
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
     private void cleanup(AnthropicClient client, String agentId, String createdEnvironmentId, RunContext runContext) {
         // The session itself is kept so that it can be inspected with the returned session id.
+        var wasInterrupted = Thread.interrupted();
         if (agentId != null) {
             try {
                 client.beta().agents().archive(agentId);
@@ -462,6 +538,9 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             } catch (Exception e) {
                 runContext.logger().warn("Could not archive the temporary environment {}: {}", createdEnvironmentId, e.getMessage());
             }
+        }
+        if (wasInterrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -518,6 +597,9 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             ANTHROPIC,
             CUSTOM
         }
+    }
+
+    private record StreamOutcome(ClaudeCodeSessionStatus status, String error) {
     }
 
     public enum Networking {
