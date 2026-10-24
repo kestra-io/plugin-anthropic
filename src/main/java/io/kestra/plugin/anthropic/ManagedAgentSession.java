@@ -23,6 +23,7 @@ import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEve
 import com.anthropic.models.beta.sessions.events.EventSendParams;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -192,6 +193,8 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         Networking rNetworking;
         try {
             rNetworking = runContext.render(networking).as(Networking.class).orElse(Networking.UNRESTRICTED);
+        } catch (IllegalVariableEvaluationException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("networking must be one of UNRESTRICTED, LIMITED: " + e.getMessage(), e);
         }
@@ -394,9 +397,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
                         .build()
                 );
 
-                // Events are read on their own thread, which also closes the stream: a blocked socket read ignores
-                // Thread.interrupt() and closing a stream from another thread waits for that read, so this thread
-                // only waits on a future, which lets the task timeout and kill end the run while the agent is silent.
+                // a blocked socket read ignores Thread.interrupt(), so the reader thread owns and closes the stream
                 reader = executor.submit(() ->
                 {
                     try (stream) {
