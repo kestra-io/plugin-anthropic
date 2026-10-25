@@ -10,6 +10,8 @@ public enum ClaudeCodeSessionStatus {
     SPENDING_LIMIT_REACHED,
     @Schema(title = "The session is paused and waits for an input that a flow cannot provide, such as a tool confirmation.")
     WAITING_FOR_INPUT,
+    @Schema(title = "The agent stopped because it reached the configured maximum number of turns.")
+    MAX_TURNS_REACHED,
     @Schema(title = "The session ended with an error.")
     FAILED
 }
