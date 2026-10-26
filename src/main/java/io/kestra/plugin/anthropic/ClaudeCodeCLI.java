@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,13 +80,14 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
     private static final String RESULT_FILE = "claude-result.json";
     private static final String CHANGED_FILES_LIST = ".kestra-claude-changed";
     private static final String START_MARKER = ".kestra-claude-start";
+    private static final String EXIT_CODE_FILE = "claude-exit-code";
     private static final Pattern CLI_VERSION = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
 
     @Builder.Default
     @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue("node:22");
 
-    @Schema(title = "Anthropic API key", description = "The only supported authentication; claude.ai subscription credentials must not be used.")
+    @Schema(title = "Anthropic API key", description = "The only supported authentication; claude.ai subscription credentials must not be used. The key is kept away from the CLI install step, but any `beforeCommands` you add can still read it.")
     @NotNull
     @PluginProperty(secret = true, group = "main")
     @ToString.Exclude
@@ -158,6 +160,7 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
 
         var outputFilesList = new ArrayList<>(runContext.render(getOutputFiles()).asList(String.class));
         outputFilesList.add(RESULT_FILE);
+        outputFilesList.add(EXIT_CODE_FILE);
         if (plan.keepTranscript()) {
             outputFilesList.add(TRANSCRIPT_FILE);
         }
@@ -175,13 +178,15 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
         var files = new HashMap<>(scriptOutput.getOutputFiles());
         var resultUri = files.remove(RESULT_FILE);
         var transcriptUri = files.remove(TRANSCRIPT_FILE);
+        // the script itself always ends with exit code 0: the real exit code of claude is kept in a file
+        var claudeExitCode = readExitCode(runContext, files.remove(EXIT_CODE_FILE), scriptOutput.getExitCode());
         if (resultUri == null) {
-            throw new IllegalStateException("Claude Code did not produce any result (exit code " + scriptOutput.getExitCode() + ")");
+            throw new IllegalStateException("Claude Code did not produce any result (exit code " + claudeExitCode + ")");
         }
 
         Output output;
         try (var reader = new BufferedReader(new InputStreamReader(runContext.storage().getFile(resultUri), StandardCharsets.UTF_8))) {
-            output = parseResult(reader, files, transcriptUri, scriptOutput.getExitCode());
+            output = parseResult(reader, files, transcriptUri, claudeExitCode);
         }
 
         runContext.logger().info(
@@ -194,6 +199,27 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
         return output;
     }
 
+    private static int readExitCode(RunContext runContext, URI uri, int fallback) {
+        if (uri == null) {
+            return fallback;
+        }
+        try (var reader = new BufferedReader(new InputStreamReader(runContext.storage().getFile(uri), StandardCharsets.UTF_8))) {
+            var line = reader.readLine();
+            return line == null ? fallback : Integer.parseInt(line.strip());
+        } catch (IOException | NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    // Environment values are rendered by Pebble again before the script runs, so user text travels as base64 and is decoded by the shell.
+    private static String encode(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String decoded(String variable) {
+        return "\"$(printf %s \"$" + variable + "\" | base64 -d)\"";
+    }
+
     Plan plan(RunContext runContext) throws Exception {
         var rApiKey = runContext.render(apiKey).as(String.class)
             .map(String::strip)
@@ -203,27 +229,27 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
             .filter(value -> !value.isBlank())
             .orElseThrow(() -> new IllegalArgumentException("prompt is required"));
 
-        // User-derived text only travels in environment variables: the commands are rendered again by Pebble before they run
+        // User-derived text only travels base64-encoded in environment variables: Pebble renders both the commands and the environment again
         var env = new HashMap<String, String>();
-        env.put("KESTRA_CLAUDE_KEY", rApiKey);
-        env.put("KESTRA_CLAUDE_PROMPT", rPrompt);
+        env.put("KESTRA_CLAUDE_KEY_B64", encode(rApiKey));
+        env.put("KESTRA_CLAUDE_PROMPT_B64", encode(rPrompt));
 
         var args = new ArrayList<>(List.of("claude", "-p", "--output-format", "stream-json", "--verbose"));
 
         var rSystemPrompt = runContext.render(systemPrompt).as(String.class).filter(value -> !value.isBlank());
         if (rSystemPrompt.isPresent()) {
-            env.put("KESTRA_CLAUDE_SYSTEM_PROMPT", rSystemPrompt.get());
-            args.addAll(List.of("--append-system-prompt", "\"$KESTRA_CLAUDE_SYSTEM_PROMPT\""));
+            env.put("KESTRA_CLAUDE_SYSTEM_PROMPT_B64", encode(rSystemPrompt.get()));
+            args.addAll(List.of("--append-system-prompt", decoded("KESTRA_CLAUDE_SYSTEM_PROMPT_B64")));
         }
         var rModel = runContext.render(model).as(String.class).filter(value -> !value.isBlank());
         if (rModel.isPresent()) {
-            env.put("KESTRA_CLAUDE_MODEL", rModel.get());
-            args.addAll(List.of("--model", "\"$KESTRA_CLAUDE_MODEL\""));
+            env.put("KESTRA_CLAUDE_MODEL_B64", encode(rModel.get()));
+            args.addAll(List.of("--model", decoded("KESTRA_CLAUDE_MODEL_B64")));
         }
         var rAllowedTools = runContext.render(allowedTools).asList(String.class);
         if (!rAllowedTools.isEmpty()) {
-            env.put("KESTRA_CLAUDE_ALLOWED_TOOLS", String.join(",", rAllowedTools));
-            args.addAll(List.of("--allowedTools", "\"$KESTRA_CLAUDE_ALLOWED_TOOLS\""));
+            env.put("KESTRA_CLAUDE_ALLOWED_TOOLS_B64", encode(String.join(",", rAllowedTools)));
+            args.addAll(List.of("--allowedTools", decoded("KESTRA_CLAUDE_ALLOWED_TOOLS_B64")));
         }
         runContext.render(permissionMode).as(PermissionMode.class)
             .ifPresent(value -> args.addAll(List.of("--permission-mode", value.cliValue())));
@@ -239,7 +265,8 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
                 throw new IllegalArgumentException("cliVersion must be a version or a dist-tag, such as 2.1.296 or latest");
             }
             env.put("KESTRA_CLAUDE_VERSION", rVersion);
-            beforeCommands.add("npm install -g @anthropic-ai/claude-code@\"$KESTRA_CLAUDE_VERSION\" --silent");
+            // the install step and its dependency scripts must not see the API key
+            beforeCommands.add("env -u KESTRA_CLAUDE_KEY_B64 npm install -g @anthropic-ai/claude-code@\"$KESTRA_CLAUDE_VERSION\" --silent");
         }
 
         // The CLI exits non-zero on turn or budget limits: the result event decides the status, not the exit code.
@@ -247,15 +274,20 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
         var commands = List.of(
             "touch " + START_MARKER,
             "CLAUDE_EXIT=0",
-            "ANTHROPIC_API_KEY=\"$KESTRA_CLAUDE_KEY\" " + String.join(" ", args) + " -- \"$KESTRA_CLAUDE_PROMPT\" > " + TRANSCRIPT_FILE
-                + " < /dev/null || CLAUDE_EXIT=$?",
+            "ANTHROPIC_API_KEY=" + decoded("KESTRA_CLAUDE_KEY_B64") + " " + String.join(" ", args) + " -- " + decoded("KESTRA_CLAUDE_PROMPT_B64")
+                + " > " + TRANSCRIPT_FILE + " < /dev/null || CLAUDE_EXIT=$?",
             "grep '\"type\":\"result\"' " + TRANSCRIPT_FILE + " | tail -n 1 > " + RESULT_FILE + " || true",
-            // the list is complete before anything is copied, so the output directory inside the working directory is never rescanned
-            "find . -type f -newer " + START_MARKER + " -not -path './.git/*' -not -path '*/node_modules/*' -not -name " + START_MARKER
-                + " -not -name " + TRANSCRIPT_FILE + " -not -name " + RESULT_FILE + " -not -name " + CHANGED_FILES_LIST + " > "
+            // the runner exports the output directory as $OUTPUT_DIR; it lives inside the working directory, so it is skipped by name
+            "OUT_NAME=$(basename \"$OUTPUT_DIR\")",
+            // the list is complete before anything is copied, so the output directory is never rescanned
+            "find . -type f -newer " + START_MARKER + " -not -path './.git/*' -not -path '*/node_modules/*' -not -path \"*/$OUT_NAME/*\" -not -name "
+                + START_MARKER + " -not -name " + TRANSCRIPT_FILE + " -not -name " + RESULT_FILE + " -not -name " + EXIT_CODE_FILE + " -not -name "
+                + CHANGED_FILES_LIST + " > " + CHANGED_FILES_LIST,
+            "mkdir -p \"$OUTPUT_DIR\"",
+            // portable copy: `cp --parents` is GNU only
+            "while IFS= read -r changed; do changed=\"${changed#./}\"; mkdir -p \"$OUTPUT_DIR/$(dirname \"$changed\")\" && cp \"$changed\" \"$OUTPUT_DIR/$changed\"; done < "
                 + CHANGED_FILES_LIST,
-            "mkdir -p \"{{ outputDir }}\"",
-            "while IFS= read -r changed; do cp --parents \"$changed\" \"{{ outputDir }}\"; done < " + CHANGED_FILES_LIST,
+            "echo \"$CLAUDE_EXIT\" > " + EXIT_CODE_FILE,
             "echo \"claude exited with code $CLAUDE_EXIT\""
         );
 

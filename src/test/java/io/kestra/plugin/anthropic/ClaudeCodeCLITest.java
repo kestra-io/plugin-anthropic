@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -78,28 +80,43 @@ class ClaudeCodeCLITest {
             .build()
             .plan(runContextFactory.of(Map.of()));
 
-        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_KEY", "test-key"));
-        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_PROMPT", "Fix the failing test"));
-        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_SYSTEM_PROMPT", "Be brief"));
-        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_MODEL", "claude-sonnet-5"));
-        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_ALLOWED_TOOLS", "Read,Bash(git:*)"));
+        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_KEY_B64", b64("test-key")));
+        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_PROMPT_B64", b64("Fix the failing test")));
+        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_SYSTEM_PROMPT_B64", b64("Be brief")));
+        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_MODEL_B64", b64("claude-sonnet-5")));
+        assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_ALLOWED_TOOLS_B64", b64("Read,Bash(git:*)")));
         assertThat(plan.env(), hasEntry("KESTRA_CLAUDE_VERSION", "2.1.296"));
         assertThat(plan.env(), not(hasKey("ANTHROPIC_API_KEY")));
 
         var script = String.join("\n", plan.commands());
-        assertThat(script, containsString("--model \"$KESTRA_CLAUDE_MODEL\""));
-        assertThat(script, containsString("--allowedTools \"$KESTRA_CLAUDE_ALLOWED_TOOLS\""));
-        assertThat(script, containsString("--append-system-prompt \"$KESTRA_CLAUDE_SYSTEM_PROMPT\""));
+        assertThat(script, containsString("--model \"$(printf %s \"$KESTRA_CLAUDE_MODEL_B64\" | base64 -d)\""));
+        assertThat(script, containsString("--allowedTools \"$(printf %s \"$KESTRA_CLAUDE_ALLOWED_TOOLS_B64\" | base64 -d)\""));
+        assertThat(script, containsString("--append-system-prompt \"$(printf %s \"$KESTRA_CLAUDE_SYSTEM_PROMPT_B64\" | base64 -d)\""));
         assertThat(script, containsString("--permission-mode acceptEdits"));
         assertThat(script, containsString("--max-turns 7"));
         assertThat(script, containsString("--max-budget-usd 1.5"));
-        assertThat(script, containsString("ANTHROPIC_API_KEY=\"$KESTRA_CLAUDE_KEY\" claude -p"));
-        assertThat(script, containsString("-- \"$KESTRA_CLAUDE_PROMPT\""));
+        assertThat(script, containsString("ANTHROPIC_API_KEY=\"$(printf %s \"$KESTRA_CLAUDE_KEY_B64\" | base64 -d)\" claude -p"));
+        assertThat(script, containsString("-- \"$(printf %s \"$KESTRA_CLAUDE_PROMPT_B64\" | base64 -d)\""));
+        assertThat(script, containsString("\"$OUTPUT_DIR\""));
+        assertThat(script, not(containsString("{{")));
+        assertThat(script, not(containsString("--parents")));
         // the commands are rendered by Pebble again, so no user-derived text may be part of them
         assertThat(script, not(anyOf(containsString("Fix the failing test"), containsString("claude-sonnet-5"), containsString("test-key"))));
 
-        assertThat(plan.beforeCommands(), contains("npm install -g @anthropic-ai/claude-code@\"$KESTRA_CLAUDE_VERSION\" --silent"));
+        assertThat(plan.beforeCommands(), contains("env -u KESTRA_CLAUDE_KEY_B64 npm install -g @anthropic-ai/claude-code@\"$KESTRA_CLAUDE_VERSION\" --silent"));
         assertThat(plan.keepTranscript(), is(false));
+    }
+
+    @Test
+    void shouldEncodeTemplateLikeTextSoPebbleCannotRenderIt() throws Exception {
+        var plan = task("Compute {{ 1+1 }} and {% if x %}y{% endif %}")
+            .systemPrompt(Property.ofValue("Use {{ 2+2 }}"))
+            .build()
+            .plan(runContextFactory.of(Map.of()));
+
+        plan.env().values().forEach(value -> assertThat(value, not(anyOf(containsString("{{"), containsString("{%")))));
+        assertThat(plan.env().get("KESTRA_CLAUDE_PROMPT_B64"), is(b64("Compute {{ 1+1 }} and {% if x %}y{% endif %}")));
+        assertThat(plan.env().get("KESTRA_CLAUDE_SYSTEM_PROMPT_B64"), is(b64("Use {{ 2+2 }}")));
     }
 
     @Test
@@ -179,18 +196,20 @@ class ClaudeCodeCLITest {
 
         // the output directory lives inside the working directory, like the one created by the core
         var outputDir = Files.createDirectory(workingDir.resolve("out-" + IdUtils.create().toLowerCase(Locale.ROOT)));
-        var plan = task("--permission-mode=bypassPermissions")
+        var plan = task("--permission-mode=bypassPermissions {{ 1+1 }}")
             .installCli(Property.ofValue(false))
             .permissionMode(Property.ofValue(ClaudeCodeCLI.PermissionMode.ACCEPT_EDITS))
             .maxTurns(Property.ofValue(7))
             .build()
             .plan(runContextFactory.of(Map.of()));
-        var script = String.join("\n", plan.commands()).replace("{{ outputDir }}", outputDir.toString());
+        var script = String.join("\n", plan.commands());
 
         var processBuilder = new ProcessBuilder("bash", "-e", "-o", "pipefail", "-c", script)
             .directory(workingDir.toFile())
             .redirectErrorStream(true);
         processBuilder.environment().putAll(plan.env());
+        // the task runner exports the output directory this way
+        processBuilder.environment().put("OUTPUT_DIR", outputDir.toString());
         processBuilder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
         var process = processBuilder.start();
         var logs = new String(process.getInputStream().readAllBytes());
@@ -198,6 +217,9 @@ class ClaudeCodeCLITest {
 
         assertThat(logs, process.exitValue(), is(0));
         assertThat(logs, containsString("claude exited with code 1"));
+        assertThat(Files.readString(workingDir.resolve("claude-exit-code")).strip(), is("1"));
+        assertThat(Files.exists(outputDir.resolve("claude-exit-code")), is(false));
+        assertThat(Files.exists(workingDir.resolve("{{ outputDir }}")), is(false));
         assertThat(Files.readString(outputDir.resolve("notes.txt")).strip(), is("changed by claude"));
         assertThat(Files.readString(outputDir.resolve("sub/deep.txt")).strip(), is("nested"));
         assertThat(Files.exists(outputDir.resolve("old.txt")), is(false));
@@ -205,7 +227,7 @@ class ClaudeCodeCLITest {
         assertThat(Files.exists(outputDir.resolve("claude-session.jsonl")), is(false));
         assertThat(Files.readString(workingDir.resolve("seen-key.txt")), is("test-key"));
         // the prompt goes after `--`, so a prompt that looks like an option stays a prompt
-        assertThat(Files.readString(workingDir.resolve("args.txt")), containsString("--\n--permission-mode=bypassPermissions"));
+        assertThat(Files.readString(workingDir.resolve("args.txt")), containsString("--\n--permission-mode=bypassPermissions {{ 1+1 }}"));
 
         try (var reader = Files.newBufferedReader(workingDir.resolve("claude-result.json"))) {
             var output = ClaudeCodeCLI.parseResult(reader, Map.of(), null, 1);
@@ -224,6 +246,10 @@ class ClaudeCodeCLITest {
             .type(ClaudeCodeCLI.class.getName())
             .apiKey(Property.ofValue("test-key"))
             .prompt(Property.ofValue(prompt));
+    }
+
+    private static String b64(String value) {
+        return Base64.getEncoder().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private static ClaudeCodeCLI.Output parse(String transcript) throws Exception {

@@ -8,6 +8,8 @@ public enum ClaudeCodeSessionStatus {
     FINISHED,
     @Schema(title = "The session stopped because it reached the configured spending limit.")
     SPENDING_LIMIT_REACHED,
+    @Schema(title = "The session stopped because it reached the configured maximum number of turns.")
+    MAX_TURNS_REACHED,
     @Schema(title = "The session is paused and waits for an input that a flow cannot provide, such as a tool confirmation.")
     WAITING_FOR_INPUT,
     @Schema(title = "The session ended with an error.")
