@@ -3,15 +3,15 @@ package io.kestra.plugin.anthropic;
 import java.util.List;
 
 import com.anthropic.models.beta.files.FileListParams;
-import io.swagger.v3.oas.annotations.media.Schema;
-import io.kestra.core.runners.RunContext;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.runners.RunContext;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -34,15 +34,15 @@ import lombok.experimental.SuperBuilder;
             title = "List files",
             full = true,
             code = """
-                id: anthropic_list_files
-                namespace: company.team
+                    id: anthropic_list_files
+                    namespace: company.team
 
-                tasks:
-                  - id: list_files
-                    type: io.kestra.plugin.anthropic.ListFiles
-                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    limit: 25
-            """
+                    tasks:
+                      - id: list_files
+                        type: io.kestra.plugin.anthropic.ListFiles
+                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                        limit: 25
+                """
         )
     }
 )
@@ -84,12 +84,13 @@ public class ListFiles extends AbstractAnthropicFiles implements RunnableTask<Li
         var rLimit = runContext.render(limit).as(Integer.class);
         var rScopeId = runContext.render(scopeId).as(String.class);
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var paramsBuilder = FileListParams.builder().addBeta(FILES_BETA);
         rAfterId.ifPresent(paramsBuilder::afterId);
         rBeforeId.ifPresent(paramsBuilder::beforeId);
-        rLimit.ifPresent(value -> {
+        rLimit.ifPresent(value ->
+        {
             if (value < 1 || value > 1000) {
                 throw new IllegalArgumentException("limit must be between 1 and 1000");
             }

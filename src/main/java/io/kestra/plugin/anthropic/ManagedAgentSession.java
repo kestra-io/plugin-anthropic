@@ -208,7 +208,7 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
             logger.warn("networking is LIMITED without allowedHosts: only MCP servers and package managers are reachable");
         }
 
-        var client = anthropicClient(rApiKey);
+        var client = anthropicClient(runContext, rApiKey);
         this.activeClient = client;
         String agentId = null;
         String createdEnvironmentId = null;
@@ -253,8 +253,8 @@ public class ManagedAgentSession extends AbstractAnthropic implements RunnableTa
         }
     }
 
-    protected AnthropicClient anthropicClient(String rApiKey) {
-        return buildClient(rApiKey);
+    protected AnthropicClient anthropicClient(io.kestra.core.runners.RunContext runContext, String rApiKey) throws Exception {
+        return buildClient(runContext, rApiKey);
     }
 
     private String createAgent(

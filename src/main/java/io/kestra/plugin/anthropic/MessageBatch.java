@@ -221,7 +221,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
         var rMode = runContext.render(mode).as(Mode.class)
             .orElseThrow(() -> new IllegalArgumentException("mode is required"));
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
         try {
             return switch (rMode) {
                 case CREATE -> createBatch(runContext, client);
@@ -466,10 +466,7 @@ public class MessageBatch extends AbstractAnthropic implements RunnableTask<Mess
                         "Each message of request '" + request.customId() + "' must set both `type` and `content`."
                     );
                 }
-                return MessageParam.builder()
-                    .role(MessageParam.Role.of(message.type().role()))
-                    .content(message.content())
-                    .build();
+                return message.toSdkMessage();
             })
             .toList();
     }

@@ -6,6 +6,7 @@ import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -29,14 +30,14 @@ import lombok.experimental.SuperBuilder;
             title = "List available models",
             full = true,
             code = """
-                id: anthropic_list_models
-                namespace: company.team
+                    id: anthropic_list_models
+                    namespace: company.team
 
-                tasks:
-                  - id: list_models
-                    type: io.kestra.plugin.anthropic.ListModels
-                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-            """
+                    tasks:
+                      - id: list_models
+                        type: io.kestra.plugin.anthropic.ListModels
+                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                """
         )
     }
 )
@@ -45,7 +46,7 @@ public class ListModels extends AbstractAnthropic implements RunnableTask<ListMo
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var page = client.models().list();
 

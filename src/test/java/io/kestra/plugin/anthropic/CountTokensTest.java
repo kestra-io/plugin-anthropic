@@ -208,7 +208,7 @@ public class CountTokensTest {
         private String baseUrl;
 
         @Override
-        protected AnthropicClient anthropicClient(String rApiKey) {
+        protected AnthropicClient anthropicClient(io.kestra.core.runners.RunContext runContext, String rApiKey) throws Exception {
             return AnthropicOkHttpClient.builder()
                 .apiKey(rApiKey)
                 .baseUrl(baseUrl)

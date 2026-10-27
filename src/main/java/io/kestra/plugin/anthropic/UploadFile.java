@@ -37,16 +37,16 @@ import lombok.experimental.SuperBuilder;
             title = "Upload a text file",
             full = true,
             code = """
-                id: anthropic_upload_file
-                namespace: company.team
+                    id: anthropic_upload_file
+                    namespace: company.team
 
-                tasks:
-                  - id: upload
-                    type: io.kestra.plugin.anthropic.UploadFile
-                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                    filePath: "{{ outputs.create_file.uri }}"
-                    mimeType: "text/plain"
-            """
+                    tasks:
+                      - id: upload
+                        type: io.kestra.plugin.anthropic.UploadFile
+                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                        filePath: "{{ outputs.create_file.uri }}"
+                        mimeType: "text/plain"
+                """
         )
     }
 )
@@ -89,10 +89,10 @@ public class UploadFile extends AbstractAnthropicFiles implements RunnableTask<U
         URI fileUri = URI.create(rFilePath);
         String resolvedFilename = resolveFileName(runContext, fileUri, rFilename);
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         try (InputStream inputStream = runContext.storage().getFile(fileUri)) {
-            var multipart = MultipartField.<InputStream>builder()
+            var multipart = MultipartField.<InputStream> builder()
                 .value(inputStream)
                 .filename(resolvedFilename)
                 .contentType(rMimeType)
