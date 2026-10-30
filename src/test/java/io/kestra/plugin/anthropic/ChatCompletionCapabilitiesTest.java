@@ -97,7 +97,7 @@ class ChatCompletionCapabilitiesTest {
         var output = task().build().run(runContextFactory.of());
         var request = requests.getFirst();
         assertThat(paths, contains("/v1/messages"));
-        assertThat(request.path("messages").get(0).path("content").asText(), is("Hello"));
+        assertThat(request.path("messages").path(0).path("content").asText(), is("Hello"));
         assertThat(request.path("max_tokens").asLong(), is(1024L));
         assertThat(request.has("thinking"), is(false));
         assertThat(request.has("temperature"), is(false));
@@ -140,7 +140,7 @@ class ChatCompletionCapabilitiesTest {
         assertThat(request.path("thinking").path("type").asText(), is("enabled"));
         assertThat(request.path("thinking").path("budget_tokens").asInt(), is(1024));
         assertThat(request.path("temperature").asDouble(), is(1.0));
-        assertThat(request.path("stop_sequences").get(0).asText(), is("END"));
+        assertThat(request.path("stop_sequences").path(0).asText(), is("END"));
         assertThat(request.path("metadata").path("user_id").asText(), is("workflow-42"));
         assertThat(request.path("service_tier").asText(), is("standard_only"));
         assertThat(betaHeaders, contains("files-api-2025-04-14,future-feature"));
@@ -171,9 +171,9 @@ class ChatCompletionCapabilitiesTest {
             .promptCaching(Property.ofValue(true))
             .build().run(runContextFactory.of(Map.of("subject", "documents", "file", "file_report")));
         var request = requests.getFirst();
-        var content = request.path("messages").get(0).path("content");
+        var content = request.path("messages").path(0).path("content");
         assertThat(content.size(), is(7));
-        assertThat(content.get(0).path("text").asText(), is("Inspect documents"));
+        assertThat(content.path(0).path("text").asText(), is("Inspect documents"));
         assertThat(content.get(1).path("source").path("url").asText(), is("https://example.com/image.png"));
         assertThat(content.get(2).path("source").path("media_type").asText(), is("image/png"));
         assertThat(content.get(3).path("source").path("file_id").asText(), is("file_image"));
@@ -182,10 +182,10 @@ class ChatCompletionCapabilitiesTest {
         assertThat(content.get(6).path("source").path("file_id").asText(), is("file_report"));
         assertThat(content.get(6).path("citations").path("enabled").asBoolean(), is(true));
         assertThat(content.get(6).path("cache_control").path("type").asText(), is("ephemeral"));
-        assertThat(content.get(0).has("cache_control"), is(false));
-        assertThat(request.path("system").get(0).path("text").asText(), is("Use documents"));
-        assertThat(request.path("system").get(0).path("cache_control").path("type").asText(), is("ephemeral"));
-        assertThat(request.path("tools").get(0).path("cache_control").path("type").asText(), is("ephemeral"));
+        assertThat(content.path(0).has("cache_control"), is(false));
+        assertThat(request.path("system").path(0).path("text").asText(), is("Use documents"));
+        assertThat(request.path("system").path(0).path("cache_control").path("type").asText(), is("ephemeral"));
+        assertThat(request.path("tools").path(0).path("cache_control").path("type").asText(), is("ephemeral"));
         assertThat(request.path("cache_control").path("type").asText(), is("ephemeral"));
     }
 
@@ -207,7 +207,7 @@ class ChatCompletionCapabilitiesTest {
         var request = requests.getFirst();
         assertThat(request.path("system").asText(), is("Original string system"));
         for (var message : request.path("messages")) {
-            assertThat(message.path("content").get(0).path("cache_control").path("type").asText(), is("ephemeral"));
+            assertThat(message.path("content").path(0).path("cache_control").path("type").asText(), is("ephemeral"));
         }
     }
 
@@ -292,7 +292,7 @@ class ChatCompletionCapabilitiesTest {
         );
         for (int i = examples.length - 4; i < examples.length; i++) {
             var flow = JacksonMapper.ofYaml().readTree(String.join("\n", examples[i].code()));
-            var task = JacksonMapper.ofJson().treeToValue(flow.path("tasks").get(0), ChatCompletion.class);
+            var task = JacksonMapper.ofJson().treeToValue(flow.path("tasks").path(0), ChatCompletion.class);
             var params = task.createParams(context);
             assertThat(params.messages(), not(empty()));
         }
