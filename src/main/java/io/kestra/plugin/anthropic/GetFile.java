@@ -33,15 +33,15 @@ import lombok.experimental.SuperBuilder;
             title = "Get file metadata",
             full = true,
             code = """
-                    id: anthropic_get_file
-                    namespace: company.team
+                id: anthropic_get_file
+                namespace: company.team
 
-                    tasks:
-                      - id: get_file
-                        type: io.kestra.plugin.anthropic.GetFile
-                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                        fileId: "{{ outputs.upload.fileId }}"
-                """
+                tasks:
+                  - id: get_file
+                    type: io.kestra.plugin.anthropic.GetFile
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    fileId: "{{ outputs.upload.fileId }}"
+            """
         )
     }
 )

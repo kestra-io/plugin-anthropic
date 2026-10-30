@@ -37,16 +37,16 @@ import lombok.experimental.SuperBuilder;
             title = "Upload a text file",
             full = true,
             code = """
-                    id: anthropic_upload_file
-                    namespace: company.team
+                id: anthropic_upload_file
+                namespace: company.team
 
-                    tasks:
-                      - id: upload
-                        type: io.kestra.plugin.anthropic.UploadFile
-                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                        filePath: "{{ outputs.create_file.uri }}"
-                        mimeType: "text/plain"
-                """
+                tasks:
+                  - id: upload
+                    type: io.kestra.plugin.anthropic.UploadFile
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    filePath: "{{ outputs.create_file.uri }}"
+                    mimeType: "text/plain"
+            """
         )
     }
 )

@@ -39,8 +39,6 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractAnthropic extends Task {
-    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(AbstractAnthropic.class);
-
     // Tool.InputSchema.Builder already sets type, properties and required, so forwarding them again would serialize them twice.
     private static final Set<String> TYPED_SCHEMA_KEYS = Set.of("type", "properties", "required");
 
@@ -70,20 +68,20 @@ public abstract class AbstractAnthropic extends Task {
     protected AnthropicClient buildClient(RunContext runContext, String rApiKey) throws Exception {
         var builder = AnthropicOkHttpClient.builder().apiKey(rApiKey);
         runContext.render(baseUrl).as(String.class).ifPresent(builder::baseUrl);
-        var connect = runContext.render(connectTimeout).as(Duration.class);
-        var read = runContext.render(readTimeout).as(Duration.class);
-        if (connect.filter(Duration::isNegative).isPresent() || read.filter(Duration::isNegative).isPresent()) {
+        var rConnectTimeout = runContext.render(connectTimeout).as(Duration.class);
+        var rReadTimeout = runContext.render(readTimeout).as(Duration.class);
+        if (rConnectTimeout.filter(Duration::isNegative).isPresent() || rReadTimeout.filter(Duration::isNegative).isPresent()) {
             throw new IllegalArgumentException("connectTimeout and readTimeout must be non-negative durations");
         }
-        var retries = runContext.render(maxRetries).as(Integer.class).orElse(2);
-        if (retries < 0) {
+        var rMaxRetries = runContext.render(maxRetries).as(Integer.class).orElse(2);
+        if (rMaxRetries < 0) {
             throw new IllegalArgumentException("maxRetries must be non-negative");
         }
-        builder.maxRetries(retries);
-        if (connect.isPresent() || read.isPresent()) {
+        builder.maxRetries(rMaxRetries);
+        if (rConnectTimeout.isPresent() || rReadTimeout.isPresent()) {
             var timeout = Timeout.builder();
-            connect.ifPresent(timeout::connect);
-            read.ifPresent(timeout::read);
+            rConnectTimeout.ifPresent(timeout::connect);
+            rReadTimeout.ifPresent(timeout::read);
             builder.timeout(timeout.build());
         }
         return builder.build();
@@ -127,7 +125,7 @@ public abstract class AbstractAnthropic extends Task {
         return outputText.toString();
     }
 
-    protected static List<ChatCompletion.ToolUse> toolUses(Message message) {
+    protected static List<ChatCompletion.ToolUse> toolUses(RunContext runContext, Message message) {
         List<ChatCompletion.ToolUse> toolUses = new ArrayList<>();
         for (ContentBlock block : message.content()) {
             block.toolUse().ifPresent(
@@ -135,7 +133,7 @@ public abstract class AbstractAnthropic extends Task {
                     ChatCompletion.ToolUse.builder()
                         .id(toolUse.id())
                         .name(toolUse.name())
-                        .input(readToolInput(toolUse._input()))
+                        .input(readToolInput(runContext, toolUse._input()))
                         .build()
                 )
             );
@@ -196,13 +194,13 @@ public abstract class AbstractAnthropic extends Task {
         return toolBuilder.build();
     }
 
-    private static Map<String, Object> readToolInput(JsonValue input) {
+    private static Map<String, Object> readToolInput(RunContext runContext, JsonValue input) {
         try {
             var json = JacksonMapper.ofJson().writeValueAsString(input);
             return JacksonMapper.ofJson().readValue(json, new TypeReference<>() {
             });
         } catch (Exception e) {
-            LOGGER.warn("Unable to convert Anthropic tool input to a JSON object; tool input will be null ({}).", e.getClass().getSimpleName());
+            runContext.logger().warn("Unable to convert Anthropic tool input to a JSON object; tool input will be null ({}).", e.getClass().getSimpleName());
             return null;
         }
     }

@@ -7,11 +7,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpServer;
@@ -19,17 +23,22 @@ import com.sun.net.httpserver.HttpServer;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.JacksonMapper;
 
-import ch.qos.logback.classic.Logger;
-import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.core.AppenderBase;
 import jakarta.inject.Inject;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
 @KestraTest
 class ChatCompletionCapabilitiesTest {
@@ -44,6 +53,7 @@ class ChatCompletionCapabilitiesTest {
     private String response;
     private String contentType;
     private int status;
+    private CountDownLatch streamRelease;
 
     @BeforeEach
     void startServer() throws Exception {
@@ -61,8 +71,16 @@ class ChatCompletionCapabilitiesTest {
             betaHeaders.add(String.valueOf(exchange.getRequestHeaders().getFirst("anthropic-beta")));
             var bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", contentType);
-            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.sendResponseHeaders(status, streamRelease == null ? bytes.length : 0);
             exchange.getResponseBody().write(bytes);
+            exchange.getResponseBody().flush();
+            if (streamRelease != null) {
+                try {
+                    streamRelease.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
             exchange.close();
         });
         server.start();
@@ -131,7 +149,7 @@ class ChatCompletionCapabilitiesTest {
         assertThat(output.getRawResponse(), containsString("redacted_thinking"));
         assertThat(output.getStopSequence(), is("END"));
         assertThat(output.getCitations(), hasSize(3));
-        assertThat(output.getCitations().get(0).startPageNumber(), is(1L));
+        assertThat(output.getCitations().getFirst().startPageNumber(), is(1L));
         assertThat(output.getCitations().get(1).endCharIndex(), is(5L));
         assertThat(output.getCitations().get(2).endBlockIndex(), is(1L));
     }
@@ -147,9 +165,9 @@ class ChatCompletionCapabilitiesTest {
             Map.of("type", "document", "source", Map.of("type", "base64", "mediaType", "application/pdf", "data", "cGRm")),
             Map.of("type", "document", "source", Map.of("type", "file", "fileId", "{{ file }}"), "title", "Report", "citations", Map.of("enabled", true))
         );
-        task().messages(dynamic(List.of(new ChatCompletion.ChatMessage(ChatCompletion.ChatMessageType.USER, blocks, "ephemeral"))))
-            .systemPromptBlocks(dynamic(List.of(new ChatCompletion.SystemPromptBlock("Use {{ subject }}", "ephemeral"))))
-            .tools(Property.ofValue(List.of(new ChatCompletion.Tool("extract", "Extract", Map.of("type", "object"), "ephemeral"))))
+        task().messages(dynamic(List.of(new ChatCompletion.ChatMessage(ChatCompletion.ChatMessageType.USER, blocks, ChatCompletion.CacheControl.EPHEMERAL))))
+            .systemPromptBlocks(dynamic(List.of(new ChatCompletion.SystemPromptBlock("Use {{ subject }}", ChatCompletion.CacheControl.EPHEMERAL))))
+            .tools(Property.ofValue(List.of(new ChatCompletion.Tool("extract", "Extract", Map.of("type", "object"), ChatCompletion.CacheControl.EPHEMERAL))))
             .promptCaching(Property.ofValue(true))
             .build().run(runContextFactory.of(Map.of("subject", "documents", "file", "file_report")));
         var request = requests.getFirst();
@@ -177,10 +195,10 @@ class ChatCompletionCapabilitiesTest {
             .messages(
                 Property.ofValue(
                     List.of(
-                        new ChatCompletion.ChatMessage(ChatCompletion.ChatMessageType.USER, "Cached", "ephemeral"),
+                        new ChatCompletion.ChatMessage(ChatCompletion.ChatMessageType.USER, "Cached", ChatCompletion.CacheControl.EPHEMERAL),
                         new ChatCompletion.ChatMessage(
                             ChatCompletion.ChatMessageType.ASSISTANT,
-                            List.of(ChatCompletion.ContentBlock.builder().type("text").text("Reply").cacheControl("ephemeral").build())
+                            List.of(ChatCompletion.ContentBlock.builder().type(ChatCompletion.ContentBlockType.TEXT).text("Reply").cacheControl(ChatCompletion.CacheControl.EPHEMERAL).build())
                         )
                     )
                 )
@@ -324,25 +342,142 @@ class ChatCompletionCapabilitiesTest {
     @Test
     void shouldWarnWhenToolInputIsNotAnObject() throws Exception {
         response = message("[{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"extract\",\"input\":\"invalid-sensitive-input\"}]");
-        var logger = (Logger) LoggerFactory.getLogger(AbstractAnthropic.class);
         var warnings = new CopyOnWriteArrayList<String>();
-        var appender = new AppenderBase<ILoggingEvent>() {
-            @Override
-            protected void append(ILoggingEvent event) {
-                warnings.add(event.getFormattedMessage());
+        var context = loggingContext(new CopyOnWriteArrayList<>(), warnings);
+        var output = task().build().run(context);
+        assertThat(output.getToolUses().getFirst().input(), nullValue());
+        assertThat(warnings, hasItem(containsString("Unable to convert Anthropic tool input")));
+        assertThat(warnings.toString(), not(containsString("invalid-sensitive-input")));
+    }
+
+    @Test
+    void shouldWarnOnlyWhenThinkingOverridesTemperature() throws Exception {
+        var warnings = new CopyOnWriteArrayList<String>();
+        var context = loggingContext(new CopyOnWriteArrayList<>(), warnings);
+        for (Double configured : new Double[] { null, 1.0, 0.5 }) {
+            var builder = task().thinking(Property.ofValue(true)).budgetTokens(Property.ofValue(1024)).maxTokens(Property.ofValue(4096L));
+            if (configured != null) {
+                builder.temperature(Property.ofValue(configured));
             }
-        };
-        appender.start();
-        logger.addAppender(appender);
-        try {
-            var output = task().build().run(runContextFactory.of());
-            assertThat(output.getToolUses().getFirst().input(), nullValue());
-            assertThat(warnings, hasItem(containsString("Unable to convert Anthropic tool input")));
-            assertThat(warnings.toString(), not(containsString("invalid-sensitive-input")));
-        } finally {
-            logger.detachAppender(appender);
-            appender.stop();
+            builder.build().run(context);
+            assertThat(requests.getLast().path("temperature").asDouble(), is(1.0));
         }
+        task().temperature(Property.ofValue(0.5)).build().run(context);
+        assertThat(requests.getLast().path("temperature").asDouble(), is(0.5));
+        assertThat(warnings, contains("temperature is set to 1 because thinking is enabled; the configured temperature is ignored"));
+    }
+
+    @Test
+    void shouldLogStreamedLinesAndFlushRemainingText() throws Exception {
+        contentType = "text/event-stream";
+        response = textStreamStart()
+            + textDelta("first") + textDelta(" line\r") + textDelta("\nsecond\n\nfinal") + textDelta(" fragment")
+            + textStreamEnd();
+        var lines = new CopyOnWriteArrayList<String>();
+        var output = task().stream(Property.ofValue(true)).build().run(loggingContext(lines, new CopyOnWriteArrayList<>()));
+        assertThat(lines, contains("first line", "second", "", "final fragment"));
+        assertThat(output.getOutputText(), is("first line\r\nsecond\n\nfinal fragment"));
+    }
+
+    @Test
+    void shouldFlushPartialTextWhenStreamFails() throws Exception {
+        contentType = "text/event-stream";
+        response = textStreamStart() + textDelta("unfinished");
+        var lines = new CopyOnWriteArrayList<String>();
+        var context = loggingContext(lines, new CopyOnWriteArrayList<>());
+        assertThrows(IllegalStateException.class, () -> task().stream(Property.ofValue(true)).build().run(context));
+        assertThat(lines, contains("unfinished"));
+    }
+
+    @Test
+    void shouldCancelAnOpenStreamWhenKilled() throws Exception {
+        contentType = "text/event-stream";
+        streamRelease = new CountDownLatch(1);
+        response = textStreamStart() + textDelta("started\n");
+        var started = new CountDownLatch(1);
+        var context = spy(runContextFactory.of());
+        var logger = mock(Logger.class);
+        doReturn(logger).when(context).logger();
+        doAnswer(invocation ->
+        {
+            started.countDown();
+            return null;
+        }).when(logger).info(eq("{}"), any(Object.class));
+        var task = task().stream(Property.ofValue(true)).build();
+        try (var executor = Executors.newCachedThreadPool()) {
+            var execution = executor.submit(() -> task.run(context));
+            try {
+                assertThat(started.await(20, TimeUnit.SECONDS), is(true));
+                var cancellation = executor.submit(task::kill);
+                cancellation.get(5, TimeUnit.SECONDS);
+                assertThrows(ExecutionException.class, () -> execution.get(5, TimeUnit.SECONDS));
+                task.kill();
+                assertThat(requests, hasSize(1));
+            } finally {
+                streamRelease.countDown();
+                execution.cancel(true);
+            }
+        }
+    }
+
+    @Test
+    void shouldRejectEnumTyposAndKeepLowercaseYamlValues() throws Exception {
+        var mapper = JacksonMapper.ofYaml();
+        for (String invalid : List.of(
+            "type: typo\ntext: hello",
+            "type: image\nsource: {type: typo}",
+            "type: text\ntext: hello\ncacheControl: typo"
+        )) {
+            assertThrows(Exception.class, () -> mapper.readValue(invalid, ChatCompletion.ContentBlock.class));
+        }
+        assertThrows(Exception.class, () -> mapper.readValue("type: USER\ncontent: hello\ncacheControl: typo", ChatCompletion.ChatMessage.class));
+        assertThrows(Exception.class, () -> mapper.readValue("text: hello\ncacheControl: typo", ChatCompletion.SystemPromptBlock.class));
+        assertThrows(Exception.class, () -> mapper.readValue("name: extract\ncacheControl: typo", ChatCompletion.Tool.class));
+        var block = mapper.readValue("type: image\nsource: {type: url, url: 'https://example.com/image.png'}\ncacheControl: ephemeral", ChatCompletion.ContentBlock.class);
+        assertThat(block.type(), is(ChatCompletion.ContentBlockType.IMAGE));
+        assertThat(block.source().type(), is(ChatCompletion.ContentSourceType.URL));
+        assertThat(block.cacheControl(), is(ChatCompletion.CacheControl.EPHEMERAL));
+        var serialized = JacksonMapper.ofJson().valueToTree(block);
+        assertThat(serialized.path("type").asText(), is("image"));
+        assertThat(serialized.path("source").path("type").asText(), is("url"));
+        assertThat(serialized.path("cacheControl").asText(), is("ephemeral"));
+    }
+
+    private RunContext loggingContext(List<String> lines, List<String> warnings) {
+        var context = spy(runContextFactory.of());
+        var logger = mock(Logger.class);
+        doReturn(logger).when(context).logger();
+        doAnswer(invocation ->
+        {
+            lines.add(invocation.getArgument(1).toString());
+            return null;
+        }).when(logger).info(eq("{}"), any(Object.class));
+        doAnswer(invocation ->
+        {
+            warnings.add(invocation.getArgument(0));
+            return null;
+        }).when(logger).warn(anyString());
+        doAnswer(invocation ->
+        {
+            warnings.add(invocation.getArgument(0));
+            return null;
+        }).when(logger).warn(anyString(), any(Object.class));
+        return context;
+    }
+
+    private static String textStreamStart() {
+        return event("message_start", "{\"type\":\"message_start\",\"message\":" + message("[]") + "}")
+            + event("content_block_start", "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}");
+    }
+
+    private static String textDelta(String text) throws Exception {
+        return delta(0, JacksonMapper.ofJson().writeValueAsString(Map.of("type", "text_delta", "text", text)));
+    }
+
+    private static String textStreamEnd() {
+        return event("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}")
+            + event("message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":25}}")
+            + event("message_stop", "{\"type\":\"message_stop\"}");
     }
 
     private ChatCompletion.ChatCompletionBuilder<?, ?> task() {

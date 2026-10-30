@@ -30,14 +30,14 @@ import lombok.experimental.SuperBuilder;
             title = "List available models",
             full = true,
             code = """
-                    id: anthropic_list_models
-                    namespace: company.team
+                id: anthropic_list_models
+                namespace: company.team
 
-                    tasks:
-                      - id: list_models
-                        type: io.kestra.plugin.anthropic.ListModels
-                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                """
+                tasks:
+                  - id: list_models
+                    type: io.kestra.plugin.anthropic.ListModels
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+            """
         )
     }
 )

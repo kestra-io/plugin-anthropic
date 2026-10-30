@@ -34,15 +34,15 @@ import lombok.experimental.SuperBuilder;
             title = "List files",
             full = true,
             code = """
-                    id: anthropic_list_files
-                    namespace: company.team
+                id: anthropic_list_files
+                namespace: company.team
 
-                    tasks:
-                      - id: list_files
-                        type: io.kestra.plugin.anthropic.ListFiles
-                        apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
-                        limit: 25
-                """
+                tasks:
+                  - id: list_files
+                    type: io.kestra.plugin.anthropic.ListFiles
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    limit: 25
+            """
         )
     }
 )
