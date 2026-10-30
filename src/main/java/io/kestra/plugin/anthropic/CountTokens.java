@@ -179,14 +179,11 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         var rSystem = runContext.render(system).as(String.class);
         var rTools = runContext.render(tools).asList(ChatCompletion.Tool.class);
 
-        var client = anthropicClient(rApiKey);
+        var client = anthropicClient(runContext, rApiKey);
         try {
             List<MessageParam> messageParams = rMessages.stream()
                 .map(
-                    message -> MessageParam.builder()
-                        .role(MessageParam.Role.of(message.type().role()))
-                        .content(message.content())
-                        .build()
+                    ChatCompletion.ChatMessage::toSdkMessage
                 )
                 .toList();
 
@@ -219,8 +216,8 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         }
     }
 
-    protected AnthropicClient anthropicClient(String rApiKey) {
-        return buildClient(rApiKey);
+    protected AnthropicClient anthropicClient(io.kestra.core.runners.RunContext runContext, String rApiKey) throws Exception {
+        return buildClient(runContext, rApiKey);
     }
 
     @Builder

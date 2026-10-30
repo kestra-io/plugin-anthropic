@@ -58,7 +58,7 @@ public class DeleteFile extends AbstractAnthropicFiles implements RunnableTask<D
         var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
         var rFileId = runContext.render(fileId).as(String.class).orElseThrow();
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var params = FileDeleteParams.builder()
             .addBeta(FILES_BETA)

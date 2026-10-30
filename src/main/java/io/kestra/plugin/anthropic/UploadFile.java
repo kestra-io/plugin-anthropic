@@ -89,10 +89,10 @@ public class UploadFile extends AbstractAnthropicFiles implements RunnableTask<U
         URI fileUri = URI.create(rFilePath);
         String resolvedFilename = resolveFileName(runContext, fileUri, rFilename);
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         try (InputStream inputStream = runContext.storage().getFile(fileUri)) {
-            var multipart = MultipartField.<InputStream>builder()
+            var multipart = MultipartField.<InputStream> builder()
                 .value(inputStream)
                 .filename(resolvedFilename)
                 .contentType(rMimeType)
