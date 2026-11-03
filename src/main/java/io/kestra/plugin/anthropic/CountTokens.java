@@ -8,6 +8,7 @@ import com.anthropic.models.messages.MessageCountTokensTool;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
 
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -143,7 +144,10 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
     @PluginProperty(group = "main")
     private Property<String> model;
 
-    @Schema(title = "Messages", description = "Ordered chat turns rendered from properties; include at least one USER message.")
+    @Schema(
+        title = "Messages",
+        description = "Ordered chat turns rendered from properties. Include at least one USER message. Content accepts text or TEXT, IMAGE and DOCUMENT blocks, without FILE sources."
+    )
     @NotNull
     @PluginProperty(group = "main")
     private Property<List<ChatCompletion.ChatMessage>> messages;
@@ -179,15 +183,10 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         var rSystem = runContext.render(system).as(String.class);
         var rTools = runContext.render(tools).asList(ChatCompletion.Tool.class);
 
-        var client = anthropicClient(rApiKey);
+        var client = anthropicClient(runContext, rApiKey);
         try {
             List<MessageParam> messageParams = rMessages.stream()
-                .map(
-                    message -> MessageParam.builder()
-                        .role(MessageParam.Role.of(message.type().role()))
-                        .content(message.content())
-                        .build()
-                )
+                .map(message -> message.toSdkMessage("CountTokens"))
                 .toList();
 
             var paramsBuilder = MessageCountTokensParams.builder()
@@ -219,8 +218,8 @@ public class CountTokens extends AbstractAnthropic implements RunnableTask<Count
         }
     }
 
-    protected AnthropicClient anthropicClient(String rApiKey) {
-        return buildClient(rApiKey);
+    protected AnthropicClient anthropicClient(RunContext runContext, String rApiKey) throws IllegalVariableEvaluationException {
+        return buildClient(runContext, rApiKey);
     }
 
     @Builder

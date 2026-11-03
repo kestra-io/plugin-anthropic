@@ -57,7 +57,7 @@ public class GetFile extends AbstractAnthropicFiles implements RunnableTask<GetF
         var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
         var rFileId = runContext.render(fileId).as(String.class).orElseThrow();
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var params = FileRetrieveMetadataParams.builder()
             .addBeta(FILES_BETA)

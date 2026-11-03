@@ -84,7 +84,7 @@ public class ListFiles extends AbstractAnthropicFiles implements RunnableTask<Li
         var rLimit = runContext.render(limit).as(Integer.class);
         var rScopeId = runContext.render(scopeId).as(String.class);
 
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var paramsBuilder = FileListParams.builder().addBeta(FILES_BETA);
         rAfterId.ifPresent(paramsBuilder::afterId);

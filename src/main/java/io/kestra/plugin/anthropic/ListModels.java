@@ -45,7 +45,7 @@ public class ListModels extends AbstractAnthropic implements RunnableTask<ListMo
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var client = buildClient(rApiKey);
+        var client = buildClient(runContext, rApiKey);
 
         var page = client.models().list();
 

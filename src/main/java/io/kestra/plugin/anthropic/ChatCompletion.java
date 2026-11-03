@@ -1,15 +1,41 @@
 package io.kestra.plugin.anthropic;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
+import com.anthropic.client.AnthropicClient;
+import com.anthropic.helpers.MessageAccumulator;
+import com.anthropic.models.messages.Base64ImageSource;
+import com.anthropic.models.messages.Base64PdfSource;
 import com.anthropic.models.messages.CacheControlEphemeral;
+import com.anthropic.models.messages.CitationsConfigParam;
+import com.anthropic.models.messages.ContentBlockParam;
+import com.anthropic.models.messages.DocumentBlockParam;
+import com.anthropic.models.messages.ImageBlockParam;
+import com.anthropic.models.messages.Message;
 import com.anthropic.models.messages.MessageCreateParams;
 import com.anthropic.models.messages.MessageParam;
 import com.anthropic.models.messages.Model;
+import com.anthropic.models.messages.TextBlockParam;
+import com.anthropic.models.messages.ThinkingConfigEnabled;
+import com.anthropic.models.messages.ToolChoiceAny;
+import com.anthropic.models.messages.ToolChoiceAuto;
+import com.anthropic.models.messages.ToolChoiceNone;
+import com.anthropic.models.messages.ToolChoiceTool;
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.databind.JsonMappingException;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -22,6 +48,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -190,6 +217,147 @@ import lombok.experimental.SuperBuilder;
                         maxUses: 3
                 """
         ),
+        @Example(
+            title = "Stream a response with extended thinking and cost attribution",
+            full = true,
+            code = """
+                id: anthropic_thinking_stream
+                namespace: company.team
+
+                tasks:
+                  - id: reason
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: claude-sonnet-4-6
+                    maxTokens: 4096
+                    thinking: true
+                    budgetTokens: 1024
+                    stream: true
+                    stopSequences: ["END"]
+                    metadata:
+                      userId: workflow-analysis
+                    serviceTier: STANDARD_ONLY
+                    connectTimeout: PT30S
+                    readTimeout: PT5M
+                    maxRetries: 2
+                    messages:
+                      - type: USER
+                        content: "Explain why the sum of two odd integers is even."
+                """
+        ),
+        @Example(
+            title = "Analyze images and PDFs with citations and explicit cache breakpoints",
+            full = true,
+            code = """
+                id: anthropic_multimodal
+                namespace: company.team
+
+                tasks:
+                  - id: analyze
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: claude-sonnet-4-6
+                    maxTokens: 2048
+                    systemPromptBlocks:
+                      - text: "Analyze the supplied sources and cite evidence."
+                        cacheControl: EPHEMERAL
+                    messages:
+                      - type: USER
+                        cacheControl: EPHEMERAL
+                        content:
+                          - type: TEXT
+                            text: "Compare the image with the report."
+                          - type: IMAGE
+                            source:
+                              type: URL
+                              url: https://upload.wikimedia.org/wikipedia/commons/a/a9/Example.jpg
+                          - type: DOCUMENT
+                            source:
+                              type: URL
+                              url: https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf
+                            title: Report
+                            citations:
+                              enabled: true
+                """
+        ),
+        @Example(
+            title = "Use uploaded files and base64 content with beta API features",
+            full = true,
+            code = """
+                id: anthropic_file_content
+                namespace: company.team
+
+                inputs:
+                  - id: image_base64
+                    type: STRING
+                  - id: pdf_base64
+                    type: STRING
+                  - id: image_file_id
+                    type: STRING
+                  - id: pdf_file_id
+                    type: STRING
+
+                tasks:
+                  - id: analyze
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: claude-sonnet-4-6
+                    betas: [files-api-2025-04-14]
+                    messages:
+                      - type: USER
+                        content:
+                          - type: TEXT
+                            text: "Summarize these sources. File IDs come from UploadFile."
+                          - type: IMAGE
+                            source:
+                              type: BASE64
+                              mediaType: image/png
+                              data: "{{ inputs.image_base64 }}"
+                          - type: DOCUMENT
+                            source:
+                              type: BASE64
+                              mediaType: application/pdf
+                              data: "{{ inputs.pdf_base64 }}"
+                          - type: IMAGE
+                            source:
+                              type: FILE
+                              fileId: "{{ inputs.image_file_id }}"
+                          - type: DOCUMENT
+                            source:
+                              type: FILE
+                              fileId: "{{ inputs.pdf_file_id }}"
+                """
+        ),
+        @Example(
+            title = "Select a tool, cache its definition and tune the client",
+            full = true,
+            code = """
+                id: anthropic_tool_choice
+                namespace: company.team
+
+                tasks:
+                  - id: extract
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    baseUrl: https://api.anthropic.com
+                    model: claude-sonnet-4-6
+                    toolChoice: TOOL
+                    toolChoiceName: extract_name
+                    tools:
+                      - name: extract_name
+                        description: Extract a person's name
+                        cacheControl: EPHEMERAL
+                        inputSchema:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                          required: [name]
+                    messages:
+                      - type: USER
+                        content: "My name is Ada."
+                """
+        ),
     },
     metrics = {
         @Metric(
@@ -220,14 +388,68 @@ import lombok.experimental.SuperBuilder;
 )
 public class ChatCompletion extends AbstractAnthropicChat implements RunnableTask<ChatCompletion.Output> {
 
-    @Schema(title = "Messages", description = "Ordered chat turns rendered from properties; include at least one USER message.")
+    @Schema(
+        title = "Messages",
+        description = "Ordered chat turns. Include at least one USER message. Content accepts a string or a list of TEXT, IMAGE, and DOCUMENT blocks. Image/PDF sources support URL, BASE64, and FILE (fileId), and FILE sources require the Files API beta in betas."
+    )
     @NotNull
     @PluginProperty(group = "main")
     private Property<List<ChatMessage>> messages;
 
-    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation; rendered before sending to Claude.")
+    @Schema(title = "System prompt", description = "Optional system instructions applied to the whole conversation. Use systemPromptBlocks instead for per-block cache control.")
     @PluginProperty(group = "advanced")
     private Property<String> system;
+
+    @Schema(title = "System prompt blocks", description = "Optional system blocks with text and cacheControl: EPHEMERAL. Mutually exclusive with system.")
+    @PluginProperty(group = "advanced")
+    private Property<List<SystemPromptBlock>> systemPromptBlocks;
+
+    @Schema(
+        title = "Extended thinking",
+        description = "Enable Claude's extended thinking. Requires budgetTokens and sets temperature to 1, warning when a different temperature is provided. Defaults to false."
+    )
+    @PluginProperty(group = "advanced")
+    @Builder.Default
+    private Property<Boolean> thinking = Property.ofValue(false);
+
+    @Schema(title = "Thinking token budget", description = "Required when thinking is enabled. At least 1024 and strictly less than maxTokens.")
+    @PluginProperty(group = "advanced")
+    private Property<@Min(1024) Integer> budgetTokens;
+
+    @Schema(
+        title = "Tool choice",
+        description = "AUTO lets Claude decide, ANY requires a tool, TOOL requires toolChoiceName and NONE disables tools. Forced tool use is incompatible with thinking. Unset uses the API default (AUTO when tools are provided)."
+    )
+    @PluginProperty(group = "advanced")
+    private Property<ToolChoice> toolChoice;
+
+    @Schema(title = "Tool choice name", description = "Name of the tool to call when toolChoice is TOOL.")
+    @PluginProperty(group = "advanced")
+    private Property<String> toolChoiceName;
+
+    @Schema(title = "Stop sequences", description = "Optional strings that stop generation. The matched string is returned in stopSequence.")
+    @PluginProperty(group = "advanced")
+    private Property<List<String>> stopSequences;
+
+    @Schema(
+        title = "Stream response",
+        description = "Log complete text lines as they arrive, flush the final partial line, and return the complete response and usage at the end. Defaults to false."
+    )
+    @PluginProperty(group = "execution")
+    @Builder.Default
+    private Property<Boolean> stream = Property.ofValue(false);
+
+    @Schema(title = "Metadata", description = "Optional attribution metadata containing userId. Do not include personal information.")
+    @PluginProperty(group = "advanced")
+    private Property<Metadata> metadata;
+
+    @Schema(title = "Service tier", description = "AUTO (Anthropic chooses the tier) or STANDARD_ONLY (standard capacity only). Unset uses the API default.")
+    @PluginProperty(group = "advanced")
+    private Property<ServiceTier> serviceTier;
+
+    @Schema(title = "Beta features", description = "Optional Anthropic beta identifiers sent in the anthropic-beta header, for example files-api-2025-04-14 for file_id sources.")
+    @PluginProperty(group = "advanced")
+    private Property<List<String>> betas;
 
     @Schema(
         title = "Tools",
@@ -245,43 +467,197 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
             See the [Anthropic prompt caching documentation](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching) for details."""
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<Boolean> promptCaching = Property.ofValue(false);
+
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final transient AtomicBoolean isKilled = new AtomicBoolean(false);
+
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final transient AtomicReference<Runnable> killable = new AtomicReference<>();
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rApiKey = runContext.render(apiKey).as(String.class).orElseThrow();
-        var rModel = runContext.render(model).as(String.class).orElseThrow();
+        var params = createParams(runContext);
+        var rApiKey = runContext.render(apiKey).as(String.class).filter(value -> !value.isBlank())
+            .orElseThrow(() -> new IllegalArgumentException("apiKey is required"));
+        var rStream = runContext.render(stream).as(Boolean.class).orElse(false);
+        var client = buildClient(runContext, rApiKey);
+        try {
+            var response = requestResponse(runContext, client, params, rStream);
+            if (isKilled.get()) {
+                throw new InterruptedException("Chat completion was killed");
+            }
+            sendMetrics(runContext, response);
+            return toOutput(runContext, response);
+        } finally {
+            killable.set(null);
+            client.close();
+        }
+    }
+
+    @Override
+    public void kill() {
+        if (isKilled.compareAndSet(false, true)) {
+            var action = killable.get();
+            if (action != null) {
+                action.run();
+            }
+        }
+    }
+
+    private Message requestResponse(RunContext runContext, AnthropicClient client, MessageCreateParams params, boolean rStream) throws Exception {
+        // Closing the SDK reader can block on its read lock, so interrupt the virtual thread first to unblock the socket.
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var request = executor.submit(() -> rStream ? consumeStream(runContext, client, params) : client.messages().create(params));
+            var logger = runContext.logger();
+            killable.set(() ->
+            {
+                request.cancel(true);
+                try {
+                    client.close();
+                } catch (RuntimeException e) {
+                    logger.warn("Unable to close Anthropic client while killing the task ({}).", e.getClass().getSimpleName());
+                }
+            });
+            try {
+                // a kill that arrived before the request was published still cancels it
+                if (isKilled.get()) {
+                    request.cancel(true);
+                }
+                return request.get();
+            } catch (ExecutionException e) {
+                if (e.getCause() instanceof Exception cause) {
+                    throw cause;
+                }
+                if (e.getCause() instanceof Error error) {
+                    throw error;
+                }
+                throw new IllegalStateException("The Anthropic request failed.", e.getCause());
+            } finally {
+                request.cancel(true);
+            }
+        }
+    }
+
+    private static Message consumeStream(RunContext runContext, AnthropicClient client, MessageCreateParams params) {
+        var accumulator = MessageAccumulator.create();
+        var pendingText = new StringBuilder();
+        try (var events = client.messages().createStreaming(params)) {
+            events.stream().forEach(event ->
+            {
+                accumulator.accumulate(event);
+                event.contentBlockDelta().ifPresent(delta -> delta.delta().text().ifPresent(text -> logStreamText(runContext, pendingText, text.text())));
+            });
+            return accumulator.message();
+        } finally {
+            if (!pendingText.isEmpty()) {
+                runContext.logger().info("{}", pendingText.toString());
+            }
+        }
+    }
+
+    private static void logStreamText(RunContext runContext, StringBuilder pendingText, String text) {
+        // only the appended text can hold a new newline, so long lines are not rescanned on every delta
+        var from = pendingText.length();
+        pendingText.append(text);
+        int newline;
+        while ((newline = pendingText.indexOf("\n", from)) >= 0) {
+            from = 0;
+            var end = newline > 0 && pendingText.charAt(newline - 1) == '\r' ? newline - 1 : newline;
+            runContext.logger().info("{}", pendingText.substring(0, end));
+            pendingText.delete(0, newline + 1);
+        }
+    }
+
+    private MessageCreateParams createParams(RunContext runContext) throws Exception {
+        var rModel = runContext.render(model).as(String.class).filter(value -> !value.isBlank())
+            .orElseThrow(() -> new IllegalArgumentException("model is required"));
         var rMaxTokens = runContext.render(maxTokens).as(Long.class).orElse(1024L);
         var rMessages = runContext.render(messages).asList(ChatMessage.class);
         var rTemperature = runContext.render(temperature).as(Double.class);
         var rTopP = runContext.render(topP).as(Double.class);
         var rTopK = runContext.render(topK).as(Integer.class);
         var rSystem = runContext.render(system).as(String.class);
+        var rSystemPromptBlocks = runContext.render(systemPromptBlocks).asList(SystemPromptBlock.class);
         var rAllTools = runContext.render(tools).asList(ChatTool.class);
         var rTools = rAllTools.stream().filter(Tool.class::isInstance).map(Tool.class::cast).toList();
         var rBuiltInTools = rAllTools.stream().filter(BuiltInTool.class::isInstance).map(BuiltInTool.class::cast).toList();
         var rPromptCaching = runContext.render(promptCaching).as(Boolean.class).orElse(false);
 
-        var client = buildClient(rApiKey);
-
-        List<MessageParam> messageParams = rMessages.stream()
-            .map(
-                message -> MessageParam.builder()
-                    .role(MessageParam.Role.of(message.type.role()))
-                    .content(message.content)
-                    .build()
-            )
-            .toList();
+        if (rMessages.isEmpty()) {
+            throw new IllegalArgumentException("messages must contain at least one item");
+        }
+        var messageParams = rMessages.stream().map(ChatMessage::toSdkMessage).toList();
 
         var paramsBuilder = MessageCreateParams.builder()
 
             .model(Model.of(rModel))
             .maxTokens(rMaxTokens);
 
+        if (rSystem.isPresent() && !rSystemPromptBlocks.isEmpty()) {
+            throw new IllegalArgumentException("Use either system or systemPromptBlocks, not both");
+        }
         rSystem.ifPresent(paramsBuilder::system);
+        if (!rSystemPromptBlocks.isEmpty()) {
+            paramsBuilder.systemOfTextBlockParams(rSystemPromptBlocks.stream().map(SystemPromptBlock::toSdkBlock).toList());
+        }
         rTemperature.ifPresent(paramsBuilder::temperature);
         rTopP.ifPresent(paramsBuilder::topP);
         rTopK.ifPresent(paramsBuilder::topK);
+
+        var rThinking = runContext.render(thinking).as(Boolean.class).orElse(false);
+        var rToolChoice = runContext.render(toolChoice).as(ToolChoice.class);
+        if (rThinking) {
+            var rBudgetTokens = runContext.render(budgetTokens).as(Integer.class)
+                .orElseThrow(() -> new IllegalArgumentException("budgetTokens is required when thinking is enabled"));
+            if (rBudgetTokens >= rMaxTokens) {
+                throw new IllegalArgumentException("budgetTokens must be less than maxTokens.");
+            }
+            if (rToolChoice.filter(choice -> choice == ToolChoice.ANY || choice == ToolChoice.TOOL).isPresent()) {
+                throw new IllegalArgumentException("thinking only supports toolChoice AUTO or NONE");
+            }
+            if (rTemperature.filter(value -> Double.compare(value, 1.0) != 0).isPresent()) {
+                runContext.logger().warn("temperature is set to 1 because thinking is enabled. The configured temperature is ignored.");
+            }
+            paramsBuilder.thinking(ThinkingConfigEnabled.builder().budgetTokens(rBudgetTokens.longValue()).build()).temperature(1.0);
+        }
+        if (rToolChoice.isPresent()) {
+            switch (rToolChoice.get()) {
+                case AUTO -> paramsBuilder.toolChoice(ToolChoiceAuto.builder().build());
+                case ANY -> paramsBuilder.toolChoice(ToolChoiceAny.builder().build());
+                case NONE -> paramsBuilder.toolChoice(ToolChoiceNone.builder().build());
+                case TOOL -> paramsBuilder.toolChoice(
+                    ToolChoiceTool.builder().name(
+                        runContext.render(toolChoiceName).as(String.class).filter(name -> !name.isBlank())
+                            .orElseThrow(() -> new IllegalArgumentException("toolChoiceName is required when toolChoice is TOOL"))
+                    ).build()
+                );
+            }
+        }
+        var rStopSequences = runContext.render(stopSequences).asList(String.class);
+        if (!rStopSequences.isEmpty()) {
+            paramsBuilder.stopSequences(rStopSequences);
+        }
+        runContext.render(metadata).as(Metadata.class).ifPresent(value ->
+        {
+            if (value.userId() != null) {
+                paramsBuilder.metadata(com.anthropic.models.messages.Metadata.builder().userId(value.userId()).build());
+            }
+        });
+        runContext.render(serviceTier).as(ServiceTier.class).ifPresent(
+            value -> paramsBuilder.serviceTier(
+                value == ServiceTier.AUTO ? MessageCreateParams.ServiceTier.AUTO : MessageCreateParams.ServiceTier.STANDARD_ONLY
+            )
+        );
+        var rBetas = runContext.render(betas).asList(String.class);
+        if (!rBetas.isEmpty()) {
+            paramsBuilder.putAdditionalHeader("anthropic-beta", String.join(",", rBetas));
+        }
 
         // Add tools if provided
         if (!rTools.isEmpty()) {
@@ -300,23 +676,269 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
             paramsBuilder.cacheControl(CacheControlEphemeral.builder().build());
         }
 
-        var params = paramsBuilder.build();
-        var response = client.messages().create(params);
+        return paramsBuilder.build();
+    }
 
-        sendMetrics(runContext, response);
-
+    private static Output toOutput(RunContext runContext, Message response) throws Exception {
+        var reasoning = new StringBuilder();
+        var citations = new ArrayList<Citation>();
+        for (var block : response.content()) {
+            block.thinking().ifPresent(value -> reasoning.append(reasoning.isEmpty() ? "" : "\n\n").append(value.thinking()));
+            if (block.text().isPresent()) {
+                for (var citation : block.text().get().citations().orElse(List.of())) {
+                    citations.add(JacksonMapper.ofJson().convertValue(citation, Citation.class));
+                }
+            }
+        }
         return Output.builder()
             .rawResponse(JacksonMapper.ofJson().writeValueAsString(response))
             .outputText(outputText(response))
-            .toolUses(toolUses(response))
+            .toolUses(toolUses(runContext, response))
             .stopReason(stopReason(response))
+            .stopSequence(response.stopSequence().orElse(null))
+            .thinking(reasoning.isEmpty() ? null : reasoning.toString())
+            .citations(List.copyOf(citations))
             .cacheCreationInputTokens(response.usage().cacheCreationInputTokens().orElse(null))
             .cacheReadInputTokens(response.usage().cacheReadInputTokens().orElse(null))
             .build();
     }
 
     @Builder
-    public record ChatMessage(ChatMessageType type, String content) {
+    public record ChatMessage(
+        @Schema(title = "Message role") ChatMessageType type,
+        @Schema(
+            title = "Message content", description = "Plain text or a list of ContentBlock objects.", anyOf = {
+                String.class, ContentBlock[].class }
+        ) Object content,
+        @Schema(title = "Cache control", description = "Optional ephemeral breakpoint applied to the final block of this message.") CacheControl cacheControl){
+        MessageParam toSdkMessage() {
+            return toSdkMessage(null);
+        }
+
+        private static List<ContentBlock> blocks(List<?> values) {
+            var blocks = new ArrayList<ContentBlock>(values.size());
+            for (var i = 0; i < values.size(); i++) {
+                try {
+                    blocks.add(JacksonMapper.ofJson().convertValue(values.get(i), ContentBlock.class));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException(blockError(i, e), e);
+                }
+            }
+            return blocks;
+        }
+
+        // names the rejected field, so a typo like `source: {type: URLL}` is not reported as a bad block type
+        private static String blockError(int index, IllegalArgumentException e) {
+            if (e.getCause() instanceof JsonMappingException mapping && !mapping.getPath().isEmpty()) {
+                var field = mapping.getPath().stream().map(JsonMappingException.Reference::getFieldName).filter(Objects::nonNull).collect(Collectors.joining("."));
+                return "Message content block %d has an invalid value for `%s`.".formatted(index, field);
+            }
+            return "Message content block %d must be an object with type TEXT, IMAGE, or DOCUMENT.".formatted(index);
+        }
+
+        // CountTokens and MessageBatch pass their name, they cannot send the Files API beta header that FILE sources need
+        MessageParam toSdkMessage(String taskWithoutFileSources) {
+            if (type == null || content == null) {
+                throw new IllegalArgumentException("Each message must set type and content");
+            }
+            var builder = MessageParam.builder().role(MessageParam.Role.of(type.role()));
+            // a YAML scalar such as `content: 42` was a string before content accepted blocks
+            var text = content instanceof CharSequence || content instanceof Number || content instanceof Boolean ? String.valueOf(content) : null;
+            if (text != null && cacheControl == null) {
+                return builder.content(text).build();
+            }
+            var blocks = new ArrayList<ContentBlockParam>();
+            if (text != null) {
+                blocks.add(ContentBlockParam.ofText(TextBlockParam.builder().text(text).build()));
+            } else if (content instanceof List<?> values && !values.isEmpty()) {
+                for (var block : blocks(values)) {
+                    if (taskWithoutFileSources != null && block.source() != null && block.source().type() == ContentSourceType.FILE) {
+                        throw new IllegalArgumentException(
+                            "%s does not support FILE sources because it cannot send the Files API beta header. Use a URL or BASE64 source.".formatted(taskWithoutFileSources)
+                        );
+                    }
+                    blocks.add(block.toSdkBlock());
+                }
+            } else {
+                throw new IllegalArgumentException("Message content must be text or a non-empty list of content blocks. Wrap a single block in a list.");
+            }
+            if (cacheControl != null) {
+                // A message-level breakpoint belongs on its final content block.
+                var last = blocks.removeLast();
+                var cache = ChatCompletion.cacheControl(cacheControl);
+                if (last.isText()) {
+                    blocks.add(ContentBlockParam.ofText(last.asText().toBuilder().cacheControl(cache).build()));
+                } else if (last.isImage()) {
+                    blocks.add(ContentBlockParam.ofImage(last.asImage().toBuilder().cacheControl(cache).build()));
+                } else {
+                    blocks.add(ContentBlockParam.ofDocument(last.asDocument().toBuilder().cacheControl(cache).build()));
+                }
+            }
+            return builder.contentOfBlockParams(blocks).build();
+        }
+    }
+
+    static CacheControlEphemeral cacheControl(CacheControl value) {
+        return switch (value) {
+            case EPHEMERAL -> CacheControlEphemeral.builder().build();
+        };
+    }
+
+    @Builder
+    public record SystemPromptBlock(
+        @Schema(title = "System instructions") String text,
+        @Schema(title = "Cache control", description = "Optional ephemeral cache breakpoint on this system block.") CacheControl cacheControl) {
+        TextBlockParam toSdkBlock() {
+            var builder = TextBlockParam.builder().text(required(text, "systemPromptBlocks[].text"));
+            if (cacheControl != null) {
+                builder.cacheControl(ChatCompletion.cacheControl(cacheControl));
+            }
+            return builder.build();
+        }
+    }
+
+    @Builder
+    public record ContentSource(
+        @Schema(title = "Source type", description = "URL, BASE64, or FILE.") ContentSourceType type,
+        @Schema(title = "Source URL", description = "Public image or PDF URL when type is URL.") String url,
+        @Schema(title = "Base64 data", description = "Base64-encoded image or PDF bytes when type is BASE64.") String data,
+        @JsonAlias("media_type") @Schema(title = "Media type", description = "Image MIME type or application/pdf for BASE64 sources.") String mediaType,
+        @JsonAlias("file_id") @Schema(title = "File ID", description = "Anthropic file ID from UploadFile when type is FILE.") String fileId) {
+    }
+
+    @Builder
+    public record ContentBlock(
+        @Schema(title = "Block type", description = "TEXT, IMAGE, or DOCUMENT.") ContentBlockType type,
+        @Schema(title = "Text", description = "Text content when type is TEXT.") String text,
+        @Schema(title = "Source", description = "Image or PDF source.") ContentSource source,
+        @Schema(title = "Document title") String title,
+        @Schema(title = "Document context", description = "Optional context about the document.") String context,
+        @Schema(title = "Citations", description = "Set enabled to true to request source citations for this document.") CitationsConfig citations,
+        @Schema(title = "Cache control", description = "Optional ephemeral cache breakpoint on this block.") CacheControl cacheControl) {
+        ContentBlockParam toSdkBlock() {
+            if (type == null) {
+                throw new IllegalArgumentException("Content block type is required: TEXT, IMAGE, or DOCUMENT.");
+            }
+            var cache = cacheControl == null ? null : ChatCompletion.cacheControl(cacheControl);
+            if (type == ContentBlockType.TEXT) {
+                if (text == null) {
+                    throw new IllegalArgumentException("Text content blocks require text");
+                }
+                var builder = TextBlockParam.builder().text(text);
+                if (cache != null) {
+                    builder.cacheControl(cache);
+                }
+                return ContentBlockParam.ofText(builder.build());
+            }
+            if (source == null || source.type() == null) {
+                throw new IllegalArgumentException("Image and document blocks require a source with type URL, BASE64, or FILE.");
+            }
+            if (type == ContentBlockType.IMAGE) {
+                var builder = ImageBlockParam.builder();
+                switch (source.type()) {
+                    case URL -> builder.source(ImageBlockParam.Source.ofUrl(required(source.url(), "source.url")));
+                    case FILE -> builder.source(ImageBlockParam.Source.ofFile(required(source.fileId(), "source.fileId")));
+                    case BASE64 -> builder.source(
+                        Base64ImageSource.builder().data(required(source.data(), "source.data"))
+                            .mediaType(Base64ImageSource.MediaType.of(required(source.mediaType(), "source.mediaType"))).build()
+                    );
+                }
+                if (cache != null) {
+                    builder.cacheControl(cache);
+                }
+                return ContentBlockParam.ofImage(builder.build());
+            }
+            if (type == ContentBlockType.DOCUMENT) {
+                var builder = DocumentBlockParam.builder();
+                switch (source.type()) {
+                    case URL -> builder.source(DocumentBlockParam.Source.ofUrl(required(source.url(), "source.url")));
+                    case FILE -> builder.source(DocumentBlockParam.Source.ofFile(required(source.fileId(), "source.fileId")));
+                    case BASE64 -> {
+                        if (source.mediaType() != null && !"application/pdf".equals(source.mediaType())) {
+                            throw new IllegalArgumentException("Base64 documents require mediaType application/pdf");
+                        }
+                        builder.source(Base64PdfSource.builder().data(required(source.data(), "source.data")).build());
+                    }
+                }
+                Optional.ofNullable(title).ifPresent(builder::title);
+                Optional.ofNullable(context).ifPresent(builder::context);
+                if (citations != null) {
+                    builder.citations(CitationsConfigParam.builder().enabled(Boolean.TRUE.equals(citations.enabled())).build());
+                }
+                if (cache != null) {
+                    builder.cacheControl(cache);
+                }
+                return ContentBlockParam.ofDocument(builder.build());
+            }
+            throw new IllegalArgumentException("Content block type must be TEXT, IMAGE, or DOCUMENT.");
+        }
+    }
+
+    private static String required(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("%s is required".formatted(field));
+        }
+        return value;
+    }
+
+    public enum ToolChoice {
+        AUTO,
+        ANY,
+        TOOL,
+        NONE
+    }
+
+    public enum ContentBlockType {
+        @JsonAlias("text")
+        TEXT,
+        @JsonAlias("image")
+        IMAGE,
+        @JsonAlias("document")
+        DOCUMENT
+    }
+
+    public enum ContentSourceType {
+        @JsonAlias("url")
+        URL,
+        @JsonAlias("base64")
+        BASE64,
+        @JsonAlias("file")
+        FILE
+    }
+
+    public enum CacheControl {
+        @JsonAlias("ephemeral")
+        EPHEMERAL
+    }
+
+    public enum ServiceTier {
+        AUTO,
+        STANDARD_ONLY
+    }
+
+    @Builder
+    public record Metadata(@Schema(title = "User ID", description = "Opaque attribution identifier. Do not include personal information.") String userId) {
+    }
+
+    @Builder
+    public record CitationsConfig(@Schema(title = "Enabled", description = "Request citations for the document. Defaults to false.") Boolean enabled) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Citation(
+        @Schema(title = "Citation type") String type,
+        @JsonAlias("cited_text") @Schema(title = "Cited text") String citedText,
+        @JsonAlias("document_index") @Schema(title = "Document index") Long documentIndex,
+        @JsonAlias("document_title") @Schema(title = "Document title") String documentTitle,
+        @JsonAlias("start_char_index") @Schema(title = "Start character index") Long startCharIndex,
+        @JsonAlias("end_char_index") @Schema(title = "End character index") Long endCharIndex,
+        @JsonAlias("start_page_number") @Schema(title = "Start page number") Long startPageNumber,
+        @JsonAlias("end_page_number") @Schema(title = "End page number") Long endPageNumber,
+        @JsonAlias("start_block_index") @Schema(title = "Start block index") Long startBlockIndex,
+        @JsonAlias("end_block_index") @Schema(title = "End block index") Long endBlockIndex,
+        @JsonAlias("file_id") @Schema(title = "File ID") String fileId,
+        @Schema(title = "Source URL") String url,
+        @Schema(title = "Source title") String title) {
     }
 
     public enum ChatMessageType {
@@ -351,7 +973,8 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
         @Schema(title = "Tool description", description = "Optional description of what the tool does.") String description,
 
         @JsonAlias("input_schema")
-        @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.") Map<String, Object> inputSchema) implements ChatTool {
+        @Schema(title = "Input schema", description = "JSON Schema object defining the expected parameters for the tool.") Map<String, Object> inputSchema,
+        @Schema(title = "Cache control", description = "Optional ephemeral cache breakpoint on this tool.") CacheControl cacheControl) implements ChatTool {
     }
 
     public enum BuiltInToolType {
@@ -418,6 +1041,15 @@ public class ChatCompletion extends AbstractAnthropicChat implements RunnableTas
 
         @Schema(title = "Stop reason", description = "The reason the model stopped generating (e.g., end_turn, tool_use, max_tokens).")
         private String stopReason;
+
+        @Schema(title = "Stop sequence", description = "The stop string matched by the model, if any.")
+        private String stopSequence;
+
+        @Schema(title = "Thinking", description = "Extended thinking text, when returned by Claude. Redacted thinking is available only in rawResponse.")
+        private String thinking;
+
+        @Schema(title = "Citations", description = "Source references attached to response text blocks, in response order.")
+        private List<Citation> citations;
 
         @Schema(title = "Cache creation input tokens", description = "Number of tokens written to the cache.")
         private Long cacheCreationInputTokens;

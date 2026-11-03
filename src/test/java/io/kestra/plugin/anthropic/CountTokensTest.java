@@ -15,6 +15,7 @@ import com.sun.net.httpserver.HttpServer;
 
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 
 import jakarta.inject.Inject;
@@ -208,7 +209,7 @@ public class CountTokensTest {
         private String baseUrl;
 
         @Override
-        protected AnthropicClient anthropicClient(String rApiKey) {
+        protected AnthropicClient anthropicClient(RunContext runContext, String rApiKey) {
             return AnthropicOkHttpClient.builder()
                 .apiKey(rApiKey)
                 .baseUrl(baseUrl)
