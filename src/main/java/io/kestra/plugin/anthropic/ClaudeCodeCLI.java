@@ -72,6 +72,25 @@ import lombok.experimental.SuperBuilder;
                     namespaceFiles:
                       enabled: true
                 """
+        ),
+        @Example(
+            title = "Reach the Anthropic API through an authenticated HTTP proxy.",
+            full = true,
+            code = """
+                id: claude_code_cli_proxy
+                namespace: company.team
+
+                tasks:
+                  - id: review_code
+                    type: io.kestra.plugin.anthropic.ClaudeCodeCLI
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    prompt: "Review the code in this directory and list potential bugs."
+                    env:
+                      HTTPS_PROXY: "http://{{ secret('PROXY_USER') }}:{{ secret('PROXY_PASSWORD') }}@proxy.example.com:3128"
+                      NO_PROXY: "localhost,127.0.0.1,.internal.example.com"
+                    namespaceFiles:
+                      enabled: true
+                """
         )
     }
 )
@@ -87,7 +106,10 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
     @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue("node:22");
 
-    @Schema(title = "Anthropic API key", description = "The only supported authentication; claude.ai subscription credentials must not be used. The key is kept away from the CLI install step, but any `beforeCommands` you add can still read it.")
+    @Schema(
+        title = "Anthropic API key",
+        description = "The only supported authentication; claude.ai subscription credentials must not be used. The key is kept away from the CLI install step, but any `beforeCommands` you add can still read it."
+    )
     @NotNull
     @PluginProperty(secret = true, group = "main")
     @ToString.Exclude

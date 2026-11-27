@@ -87,6 +87,29 @@ import lombok.experimental.SuperBuilder;
                 """
         ),
         @Example(
+            title = "Chat completion through an authenticated HTTP proxy.",
+            full = true,
+            code = """
+                id: anthropic_chat_completion_proxy
+                namespace: company.team
+
+                tasks:
+                  - id: chat_completion
+                    type: io.kestra.plugin.anthropic.ChatCompletion
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    model: "claude-sonnet-4-6"
+                    proxy:
+                      type: HTTP
+                      address: proxy.example.com
+                      port: 3128
+                      username: "{{ secret('PROXY_USER') }}"
+                      password: "{{ secret('PROXY_PASSWORD') }}"
+                    messages:
+                      - type: USER
+                        content: "What is the capital of Japan?"
+                """
+        ),
+        @Example(
             title = "Code generation using Claude",
             full = true,
             code = """
