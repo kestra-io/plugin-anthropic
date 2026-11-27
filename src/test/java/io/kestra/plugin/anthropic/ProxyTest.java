@@ -5,6 +5,7 @@ import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.junit.jupiter.api.AfterEach;
@@ -164,6 +165,26 @@ class ProxyTest {
         var failure = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of()));
 
         assertThat(failure.getMessage(), containsString("proxy.port"));
+    }
+
+    @Test
+    void shouldRenderProxyPropertiesFromExpressions() throws Exception {
+        var task = chat(
+            ProxyConfiguration.builder()
+                .address(Property.ofExpression("{{ proxyHost }}"))
+                .port(Property.ofExpression("{{ proxyPort }}"))
+                .username(Property.ofValue(USERNAME))
+                .password(Property.ofExpression("{{ proxyPassword }}"))
+                .build()
+        );
+
+        var runContext = runContextFactory.of(
+            Map.of("proxyHost", "127.0.0.1", "proxyPort", server.getAddress().getPort(), "proxyPassword", PASSWORD)
+        );
+        var output = task.run(runContext);
+
+        assertThat(output.getOutputText(), is("Tokyo"));
+        assertThat(statuses, contains(407, 200));
     }
 
     private ChatCompletion chat(ProxyConfiguration proxy) {

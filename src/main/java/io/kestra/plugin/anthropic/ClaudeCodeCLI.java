@@ -86,7 +86,7 @@ import lombok.experimental.SuperBuilder;
                     apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
                     prompt: "Review the code in this directory and list potential bugs."
                     env:
-                      HTTPS_PROXY: "http://{{ secret('PROXY_USER') }}:{{ secret('PROXY_PASSWORD') }}@proxy.example.com:3128"
+                      HTTPS_PROXY: "http://{{ secret('PROXY_USER') | urlencode }}:{{ secret('PROXY_PASSWORD') | urlencode }}@proxy.example.com:3128"
                       NO_PROXY: "localhost,127.0.0.1,.internal.example.com"
                     namespaceFiles:
                       enabled: true

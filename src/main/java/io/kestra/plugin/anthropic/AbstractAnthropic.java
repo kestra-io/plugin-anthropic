@@ -86,7 +86,8 @@ public abstract class AbstractAnthropic extends Task {
             Optional proxy used to reach the Anthropic API. It is applied only when `proxy.address` is set; otherwise the JVM proxy settings are used.
             `proxy.port` is required with an address. `proxy.type` accepts `HTTP` or `SOCKS`, and an omitted or `DIRECT` type is treated as `HTTP`.
             `proxy.username` and `proxy.password` send Basic authentication to an `HTTP` proxy; they are rejected with `SOCKS`, which cannot authenticate here.
-            An explicit proxy takes precedence over the JVM proxy flags."""
+            An explicit proxy takes precedence over the JVM proxy flags.
+            Rejected credentials are retried up to `maxRetries` times, so set `maxRetries: 0` if the proxy locks accounts after failed logins."""
     )
     @PluginProperty(group = "connection")
     protected ProxyConfiguration proxy;
@@ -142,18 +143,22 @@ public abstract class AbstractAnthropic extends Task {
         builder.proxy(new Proxy(rType, InetSocketAddress.createUnresolved(rAddress.get(), rPort)));
 
         if (rUsername.isPresent()) {
-            builder.proxyAuthenticator(basicProxyAuthenticator(rUsername.get(), rPassword.orElse("")));
+            builder.proxyAuthenticator(basicProxyAuthenticator(runContext.logger(), rUsername.get(), rPassword.orElse("")));
         } else if (rPassword.isPresent()) {
             runContext.logger().warn("proxy.password is set without proxy.username, so the proxy credentials are ignored.");
         }
     }
 
     // ProxyAuthenticator.basic() re-adds the header on every challenge, so wrong credentials would loop; stop once it was already sent.
-    private static ProxyAuthenticator basicProxyAuthenticator(String username, String password) {
+    private static ProxyAuthenticator basicProxyAuthenticator(org.slf4j.Logger logger, String username, String password) {
         var credentials = "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.ISO_8859_1));
-        return (route, request, response) -> request.headers().values("Proxy-Authorization").isEmpty()
-            ? Optional.of(request.toBuilder().putHeader("Proxy-Authorization", credentials).build())
-            : Optional.empty();
+        return (route, request, response) -> {
+            if (request.headers().values("Proxy-Authorization").isEmpty()) {
+                return Optional.of(request.toBuilder().putHeader("Proxy-Authorization", credentials).build());
+            }
+            logger.warn("The proxy rejected the credentials (HTTP 407); check proxy.username and proxy.password.");
+            return Optional.empty();
+        };
     }
 
     protected void sendMetrics(RunContext runContext, Message message) {
