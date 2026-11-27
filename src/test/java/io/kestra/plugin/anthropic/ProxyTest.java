@@ -168,6 +168,21 @@ class ProxyTest {
     }
 
     @Test
+    void shouldIgnoreCredentialsWithoutAddress() {
+        var task = chat(
+            ProxyConfiguration.builder()
+                .username(Property.ofValue(USERNAME))
+                .password(Property.ofValue(PASSWORD))
+                .build()
+        );
+
+        var failure = assertThrows(Exception.class, () -> task.run(runContextFactory.of()));
+
+        assertThat(failure.getMessage(), not(containsString(PASSWORD)));
+        assertThat(statuses, empty());
+    }
+
+    @Test
     void shouldRenderProxyPropertiesFromExpressions() throws Exception {
         var task = chat(
             ProxyConfiguration.builder()

@@ -122,7 +122,12 @@ public abstract class AbstractAnthropic extends Task {
             return;
         }
         var rAddress = runContext.render(proxy.getAddress()).as(String.class).filter(value -> !value.isBlank());
+        var rUsername = runContext.render(proxy.getUsername()).as(String.class).filter(value -> !value.isEmpty());
+        var rPassword = runContext.render(proxy.getPassword()).as(String.class).filter(value -> !value.isEmpty());
         if (rAddress.isEmpty()) {
+            if (rUsername.isPresent() || rPassword.isPresent()) {
+                runContext.logger().warn("proxy.username and proxy.password are ignored because proxy.address is not set; set proxy.address and proxy.port.");
+            }
             return;
         }
         var rPort = runContext.render(proxy.getPort()).as(Integer.class)
@@ -133,8 +138,6 @@ public abstract class AbstractAnthropic extends Task {
         var rType = runContext.render(proxy.getType()).as(Proxy.Type.class)
             .filter(value -> value != Proxy.Type.DIRECT)
             .orElse(Proxy.Type.HTTP);
-        var rUsername = runContext.render(proxy.getUsername()).as(String.class).filter(value -> !value.isEmpty());
-        var rPassword = runContext.render(proxy.getPassword()).as(String.class).filter(value -> !value.isEmpty());
 
         if (rType == Proxy.Type.SOCKS && (rUsername.isPresent() || rPassword.isPresent())) {
             throw new IllegalArgumentException("Proxy authentication is not supported with a SOCKS proxy (proxy.type); remove proxy.username and proxy.password or use an HTTP proxy.");
