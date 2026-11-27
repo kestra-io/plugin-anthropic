@@ -41,6 +41,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.slf4j.Logger;
 
 @SuperBuilder
 @ToString
@@ -150,7 +151,7 @@ public abstract class AbstractAnthropic extends Task {
     }
 
     // ProxyAuthenticator.basic() re-adds the header on every challenge, so wrong credentials would loop; stop once it was already sent.
-    private static ProxyAuthenticator basicProxyAuthenticator(org.slf4j.Logger logger, String username, String password) {
+    private static ProxyAuthenticator basicProxyAuthenticator(Logger logger, String username, String password) {
         var credentials = "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.ISO_8859_1));
         return (route, request, response) -> {
             if (request.headers().values("Proxy-Authorization").isEmpty()) {
