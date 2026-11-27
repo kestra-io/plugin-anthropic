@@ -106,10 +106,7 @@ public class ClaudeCodeCLI extends AbstractExecScript implements RunnableTask<Cl
     @PluginProperty(group = "execution")
     protected Property<String> containerImage = Property.ofValue("node:22");
 
-    @Schema(
-        title = "Anthropic API key",
-        description = "The only supported authentication; claude.ai subscription credentials must not be used. The key is kept away from the CLI install step, but any `beforeCommands` you add can still read it."
-    )
+    @Schema(title = "Anthropic API key", description = "The only supported authentication; claude.ai subscription credentials must not be used. The key is kept away from the CLI install step, but any `beforeCommands` you add can still read it.")
     @NotNull
     @PluginProperty(secret = true, group = "main")
     @ToString.Exclude
