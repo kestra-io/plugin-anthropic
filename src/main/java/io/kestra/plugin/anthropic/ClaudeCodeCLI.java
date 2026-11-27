@@ -72,6 +72,25 @@ import lombok.experimental.SuperBuilder;
                     namespaceFiles:
                       enabled: true
                 """
+        ),
+        @Example(
+            title = "Reach the Anthropic API through an authenticated HTTP proxy.",
+            full = true,
+            code = """
+                id: claude_code_cli_proxy
+                namespace: company.team
+
+                tasks:
+                  - id: review_code
+                    type: io.kestra.plugin.anthropic.ClaudeCodeCLI
+                    apiKey: "{{ secret('ANTHROPIC_API_KEY') }}"
+                    prompt: "Review the code in this directory and list potential bugs."
+                    env:
+                      HTTPS_PROXY: "http://{{ secret('PROXY_USER') | urlencode }}:{{ secret('PROXY_PASSWORD') | urlencode }}@proxy.example.com:3128"
+                      NO_PROXY: "localhost,127.0.0.1,.internal.example.com"
+                    namespaceFiles:
+                      enabled: true
+                """
         )
     }
 )

@@ -6,6 +6,8 @@ Call Claude models from Kestra flows for text generation, summarization, classif
 
 Set `apiKey` to your Anthropic API key. Store it in a [secret](https://kestra.io/docs/concepts/secret).
 
+To reach the Anthropic API through a proxy, set the optional `proxy` property with an `address` and `port`. An `HTTP` proxy supports Basic authentication through `username` and `password`; a `SOCKS` proxy is supported without authentication. When `type` is omitted, an `HTTP` proxy is used as soon as an address is set. `ClaudeCodeCLI` has no `proxy` property: set `HTTPS_PROXY` and `NO_PROXY` in `env` instead.
+
 ## Tasks
 
 `ChatCompletion` sends a prompt to a Claude model and returns the response. Set `model` to choose the model (e.g., `claude-opus-4-7`, `claude-sonnet-4-6`) and `maxTokens` to cap the response length. It returns the completion text, any tool uses, the stop reason, and cache-token counts as outputs, and emits input/output/cache token-usage metrics.
